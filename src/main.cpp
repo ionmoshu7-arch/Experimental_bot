@@ -14,6 +14,10 @@
  *
  * BIBLIOTHEQUES : VL53L1X (Pololu), VL53L0X (Pololu), FastIMU
  *
+ * REFERENCES MATERIEL (brochage et etat des composants) :
+ *   - Rover_Cablage_Moteurs.pdf (01.09.26)
+ *   - 01_Rover_Suivi.xlsx : feuilles Suivi, Connexions, Calibration
+ *
  * >>> ARRET : COUPER L'INTERRUPTEUR. <<<
  * Rester a portee du rover pendant tout l'essai.
  * ------------------------------------------------------------
@@ -26,13 +30,16 @@
 #include "FastIMU.h"
 
 // ================== BROCHAGE ==================
+// Conforme a Rover_Cablage_Moteurs.pdf et a la feuille Connexions.
 
 #define SDA_PIN 38
 #define SCL_PIN 39
 #define I2C_CLOCK_HZ 100000
 
-#define ADRESSE_MUX 0x73        // Mettre 0x70 si A0/A1 pas encore soudes
-#define ADRESSE_IMU 0x68
+#define ADRESSE_MUX 0x73        // TCA9548A, A0/A1 soudes sur VCC
+#define ADRESSE_IMU 0x68        // MPU-6500, AD0 a la masse
+#define WHO_AM_I_REG 0x75
+#define WHO_AM_I_MPU6500 0x70
 
 #define CANAL_AVANT   0
 #define CANAL_ARRIERE 1
@@ -40,7 +47,10 @@
 #define CANAL_GAUCHE  3
 
 #define STBY_PIN 16
-#define LED_CARTE 48
+
+// PAS DE LED DE CARTE : la LED RGB de la DevKitC-1 est sur GPIO48
+// (v1.0) ou GPIO38 (v1.1). GPIO48 = encodeur M3 phase B et
+// GPIO38 = SDA : l'utiliser fausserait l'encodeur ou le bus I2C.
 
 #define M1_PWM 2
 #define M1_IN1 4        // inverse
@@ -78,8 +88,14 @@ const int SEUIL_ARRIERE_MM = 180;    // distance minimale derriere
 const float RECUL_CM = 12.0;
 const float ANGLE_VIRAGE_DEG = 70.0;
 
+// Feuille Calibration, bloc 1
 const float IMPULSIONS_PAR_TOUR = 576.0;
 const float CIRCONFERENCE_CM = 6.7 * 3.14159265;
+const float MM_PAR_IMPULSION = CIRCONFERENCE_CM * 10.0 / IMPULSIONS_PAR_TOUR;
+
+// Le VL53L0X renvoie 8190/8191 quand il n'a pas de mesure :
+// c'est un code d'erreur, PAS une distance (Calibration, bloc 5).
+const int VL53L0X_CODE_ERREUR = 8190;
 
 const int COMPTE_A_REBOURS_S = 10;
 const int DUREE_MAX_MIN = 5;         // 0 pour desactiver
@@ -92,6 +108,7 @@ struct Moteur {
   int in1;
   int in2;
   int canal;
+  const char* nom;
 };
 
 struct Encodeur {
@@ -111,15 +128,36 @@ enum Etat {
   E_FIN
 };
 
+enum EtatMesure {
+  M_ABSENT,        // capteur non detecte au demarrage
+  M_JAMAIS_LU,
+  M_OK,
+  M_HORS_PORTEE,   // VL53L0X : code 8190/8191, rien dans sa portee
+  M_TIMEOUT
+};
+
+// Un capteur de distance par canal du multiplexeur (index = canal).
+struct CapteurToF {
+  const char* nom;
+  const char* modele;
+  int porteeMm;       // portee reelle mesuree (Calibration, bloc 5)
+  bool fiable;        // false : lu et journalise, ignore pour decider
+  bool present;
+  int brut;           // derniere valeur renvoyee par la bibliotheque
+  uint8_t statutL1X;  // VL53L1X uniquement : range_status
+  EtatMesure etat;
+};
+
 // ================== OBJETS ==================
 
 Moteur moteurs[4] = {
-  { M1_PWM, M1_IN1, M1_IN2, 0 },   // avant-droit
-  { M3_PWM, M3_IN1, M3_IN2, 1 },   // arriere-droit
-  { M2_PWM, M2_IN1, M2_IN2, 2 },   // avant-gauche
-  { M4_PWM, M4_IN1, M4_IN2, 3 }    // arriere-gauche
+  { M1_PWM, M1_IN1, M1_IN2, 0, "M1 avant-droit" },
+  { M3_PWM, M3_IN1, M3_IN2, 1, "M3 arriere-droit" },
+  { M2_PWM, M2_IN1, M2_IN2, 2, "M2 avant-gauche" },
+  { M4_PWM, M4_IN1, M4_IN2, 3, "M4 arriere-gauche" }
 };
 
+// Meme ordre que moteurs[]
 Encodeur encodeurs[4] = {
   { ENC1_A, ENC1_B, 0, 0 },
   { ENC3_A, ENC3_B, 0, 0 },
@@ -139,14 +177,20 @@ VL53L0X tofArriere;
 VL53L0X tofDroite;
 VL53L0X tofGauche;
 
-bool presentAvant = false;
-bool presentArriere = false;
-bool presentDroite = false;
-bool presentGauche = false;
+// Etat au 01.09.26 (Suivi n.52 et 54) : le VL53L0X droit est
+// DEFAILLANT (renvoie 8191, ne reagit qu'a moins de 10,5 cm).
+// Passer fiable a true une fois remplace par celui de reserve.
+CapteurToF capteurs[4] = {
+  { "avant",   "VL53L1X", 4000, true,  false, -1, 0, M_JAMAIS_LU },
+  { "arriere", "VL53L0X", 1200, true,  false, -1, 0, M_JAMAIS_LU },
+  { "droite",  "VL53L0X",    0, false, false, -1, 0, M_JAMAIS_LU },
+  { "gauche",  "VL53L0X",  600, true,  false, -1, 0, M_JAMAIS_LU }
+};
 
 MPU6500 IMU;
 calData calib = { 0 };
 GyroData gyroData;
+bool imuPresent = false;
 
 // ================== ETAT GLOBAL ==================
 
@@ -162,18 +206,9 @@ bool reculPossible = true;
 int nbObstacles = 0;
 int nbReculsAnnules = 0;
 
-// Derniere distance lue par canal (-1 = jamais lue ou invalide).
-// Le debug affiche ces valeurs au lieu de refaire des mesures.
-int derniereDistance[4] = { -1, -1, -1, -1 };
 unsigned long dernierDebug = 0;
 unsigned long nbBoucles = 0;
-
-// ================== TEMOIN LUMINEUX ==================
-
-void couleurLed(uint8_t r, uint8_t v, uint8_t b) {
-  // neopixelWrite : disponible sur les coeurs ESP32 2.x et 3.x.
-  neopixelWrite(LED_CARTE, r, v, b);
-}
+long comptesDebugPrec[4] = { 0, 0, 0, 0 };
 
 // ================== INTERRUPTION ENCODEURS ==================
 
@@ -196,6 +231,7 @@ void remettreCompteursAZero() {
   noInterrupts();
   for (int i = 0; i < 4; i++) encodeurs[i].compte = 0;
   interrupts();
+  for (int i = 0; i < 4; i++) comptesDebugPrec[i] = 0;
 }
 
 // ================== MULTIPLEXEUR ==================
@@ -203,6 +239,12 @@ void remettreCompteursAZero() {
 void choisirCanal(uint8_t canal) {
   Wire.beginTransmission(ADRESSE_MUX);
   Wire.write(1 << canal);
+  Wire.endTransmission();
+}
+
+void fermerCanaux() {
+  Wire.beginTransmission(ADRESSE_MUX);
+  Wire.write(0);
   Wire.endTransmission();
 }
 
@@ -269,26 +311,81 @@ void tournerGauche(int v) {
 
 // ================== CAPTEURS ==================
 
-int lireAvant() {
-  if (!presentAvant) return -1;
-  choisirCanal(CANAL_AVANT);
-  int d = tofAvant.read();
-  if (tofAvant.timeoutOccurred()) d = -1;
-  derniereDistance[CANAL_AVANT] = d;
-  return d;
-}
+// Lit le capteur du canal donne et memorise le resultat pour le debug.
+// Renvoie la distance utilisable pour decider, en mm :
+//   - la mesure si elle est valide
+//   - la portee du capteur si rien n'est dans sa portee (8190/8191)
+//   - -1 si absent, timeout ou capteur non fiable
+int lireCapteur(uint8_t canal) {
+  CapteurToF &c = capteurs[canal];
+  if (!c.present) {
+    c.etat = M_ABSENT;
+    return -1;
+  }
 
-int lireVL53L0X(VL53L0X &capteur, uint8_t canal, bool present) {
-  if (!present) return -1;
   choisirCanal(canal);
-  int d = capteur.readRangeContinuousMillimeters();
-  if (capteur.timeoutOccurred()) d = -1;
-  derniereDistance[canal] = d;
-  return d;
+  int d;
+  bool timeout;
+  if (canal == CANAL_AVANT) {
+    d = tofAvant.read();
+    timeout = tofAvant.timeoutOccurred();
+    c.statutL1X = tofAvant.ranging_data.range_status;
+  } else {
+    VL53L0X &s = (canal == CANAL_ARRIERE) ? tofArriere
+               : (canal == CANAL_DROITE)  ? tofDroite : tofGauche;
+    d = s.readRangeContinuousMillimeters();
+    timeout = s.timeoutOccurred();
+  }
+
+  c.brut = d;
+  if (timeout) {
+    c.etat = M_TIMEOUT;
+    return -1;
+  }
+  if (canal != CANAL_AVANT && d >= VL53L0X_CODE_ERREUR) {
+    c.etat = M_HORS_PORTEE;
+    return c.fiable ? c.porteeMm : -1;
+  }
+  c.etat = M_OK;
+  return c.fiable ? d : -1;
 }
 
-int lireArriere() {
-  return lireVL53L0X(tofArriere, CANAL_ARRIERE, presentArriere);
+int lireAvant()   { return lireCapteur(CANAL_AVANT); }
+int lireArriere() { return lireCapteur(CANAL_ARRIERE); }
+
+// Texte court de la derniere mesure : "812", ">1200", "ERR", "ABS",
+// "--" (jamais lu), prefixe "NF:" si le capteur est non fiable.
+void texteMesure(uint8_t canal, char* buf, size_t taille) {
+  const CapteurToF &c = capteurs[canal];
+  const char* nf = c.fiable ? "" : "NF:";
+  switch (c.etat) {
+    case M_ABSENT:      snprintf(buf, taille, "ABS"); break;
+    case M_JAMAIS_LU:   snprintf(buf, taille, "%s--", nf); break;
+    case M_TIMEOUT:     snprintf(buf, taille, "%sERR", nf); break;
+    case M_HORS_PORTEE:
+      if (c.fiable) snprintf(buf, taille, ">%d", c.porteeMm);
+      else          snprintf(buf, taille, "NF:%d", c.brut);
+      break;
+    case M_OK:
+      if (canal == CANAL_AVANT && c.statutL1X != VL53L1X::RangeValid)
+        snprintf(buf, taille, "%s%d(%s)", nf, c.brut,
+                 VL53L1X::rangeStatusToString((VL53L1X::RangeStatus) c.statutL1X));
+      else
+        snprintf(buf, taille, "%s%d", nf, c.brut);
+      break;
+  }
+}
+
+void imprimerMesure(uint8_t canal) {
+  char buf[64];
+  texteMesure(canal, buf, sizeof(buf));
+  Serial.print("  ");
+  Serial.print(capteurs[canal].nom);
+  Serial.print(" = ");
+  Serial.print(buf);
+  if (capteurs[canal].etat == M_OK || capteurs[canal].etat == M_HORS_PORTEE)
+    Serial.print(" mm");
+  Serial.println();
 }
 
 // ================== GYROSCOPE ==================
@@ -303,6 +400,7 @@ void mettreAJourCap() {
   unsigned long maintenant = micros();
   float dt = (maintenant - dernierEchantillonGyro) / 1000000.0;
   dernierEchantillonGyro = maintenant;
+  if (!imuPresent) return;
   cap += (lireVitesseZ() - biaisGyroZ) * dt;
 }
 
@@ -313,7 +411,6 @@ void calibrerGyro() {
   for (int i = 0; i < 1500; i++) {
     somme += lireVitesseZ();
     delay(1);
-    if (i % 100 == 0) couleurLed(0, 0, (i / 100) % 2 ? 40 : 0);
   }
 
   biaisGyroZ = somme / 1500.0;
@@ -322,6 +419,149 @@ void calibrerGyro() {
   Serial.println(" deg/s");
   Serial.println();
   dernierEchantillonGyro = micros();
+}
+
+// ================== INVENTAIRE MATERIEL ==================
+
+// Plan d'adressage I2C (Suivi n.19). installe = "Fait" dans le suivi.
+struct PeripheriqueI2C {
+  uint8_t adresse;
+  const char* nom;
+  bool installe;
+};
+
+const PeripheriqueI2C PLAN_I2C[] = {
+  { 0x20, "MCP23017",          false },
+  { 0x38, "DHT20",             false },
+  { 0x3C, "OLED",              false },
+  { 0x40, "PCA9685 #1 servos", false },
+  { 0x41, "PCA9685 #2 LED",    false },
+  { 0x48, "ADS1115",           false },
+  { 0x50, "ESP32-S3-CAM",      false },
+  { 0x68, "MPU-6500",          true  },
+  { ADRESSE_MUX, "TCA9548A",   true  },
+};
+const int NB_PLAN_I2C = sizeof(PLAN_I2C) / sizeof(PLAN_I2C[0]);
+
+// Contenu prevu de chaque canal du multiplexeur (Connexions n.49-55).
+const char* PLAN_CANAUX[8] = {
+  "VL53L1X avant", "VL53L0X arriere", "VL53L0X droite", "VL53L0X gauche",
+  "TCS34725 sol gauche (prevu)", "TCS34725 sol centre (prevu)",
+  "TCS34725 sol droit (prevu)", "libre"
+};
+
+bool repond(uint8_t adresse) {
+  Wire.beginTransmission(adresse);
+  return Wire.endTransmission() == 0;
+}
+
+const PeripheriqueI2C* chercherPlan(uint8_t adresse) {
+  for (int i = 0; i < NB_PLAN_I2C; i++)
+    if (PLAN_I2C[i].adresse == adresse) return &PLAN_I2C[i];
+  return nullptr;
+}
+
+bool lireRegistre(uint8_t adresse, uint8_t reg, uint8_t &valeur) {
+  Wire.beginTransmission(adresse);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom(adresse, (uint8_t) 1) != 1) return false;
+  valeur = Wire.read();
+  return true;
+}
+
+void scannerBusPrincipal(bool &muxPresent) {
+  Serial.println("--- Bus I2C principal (SDA=GPIO38, SCL=GPIO39) ---");
+
+  // Canaux du mux fermes pour ne voir que le bus principal
+  muxPresent = repond(ADRESSE_MUX);
+  if (muxPresent) fermerCanaux();
+
+  bool vu[128] = { false };
+  for (uint8_t a = 1; a < 127; a++) {
+    if (!repond(a)) continue;
+    vu[a] = true;
+    const PeripheriqueI2C* p = chercherPlan(a);
+    Serial.printf("  0x%02X  %-20s %s\n", a, p ? p->nom : "INCONNU",
+                  !p ? "<- hors plan d'adressage"
+                     : p->installe ? "OK" : "present (non coche dans le suivi)");
+  }
+  for (int i = 0; i < NB_PLAN_I2C; i++) {
+    if (PLAN_I2C[i].installe && !vu[PLAN_I2C[i].adresse])
+      Serial.printf("  0x%02X  %-20s MANQUANT\n",
+                    PLAN_I2C[i].adresse, PLAN_I2C[i].nom);
+  }
+}
+
+void scannerCanauxMux(bool muxPresent) {
+  Serial.println("--- Canaux du TCA9548A (0x73) ---");
+  if (!muxPresent) {
+    Serial.println("  multiplexeur absent : aucun capteur de distance joignable");
+    return;
+  }
+
+  // Ce qui repond deja canaux fermes appartient au bus principal
+  fermerCanaux();
+  bool principal[128] = { false };
+  for (uint8_t a = 1; a < 127; a++) principal[a] = repond(a);
+
+  for (uint8_t canal = 0; canal < 8; canal++) {
+    choisirCanal(canal);
+    Serial.printf("  canal %d  %-28s :", canal, PLAN_CANAUX[canal]);
+    int n = 0;
+    for (uint8_t a = 1; a < 127; a++) {
+      if (principal[a] || a == ADRESSE_MUX) continue;
+      if (repond(a)) {
+        Serial.printf(" 0x%02X", a);
+        n++;
+      }
+    }
+    Serial.println(n ? "" : " vide");
+  }
+  fermerCanaux();
+}
+
+void verifierIMU() {
+  uint8_t who = 0;
+  Serial.println("--- Gyroscope ---");
+  if (!lireRegistre(ADRESSE_IMU, WHO_AM_I_REG, who)) {
+    Serial.println("  MPU-6500 (0x68)      ne repond pas");
+    return;
+  }
+  Serial.printf("  WHO_AM_I = 0x%02X  %s\n", who,
+                who == WHO_AM_I_MPU6500 ? "(MPU-6500 confirme)"
+                                        : "<- attendu 0x70 pour un MPU-6500");
+}
+
+void afficherCablageFixe() {
+  Serial.println("--- Cablage (non detectable, d'apres le plan) ---");
+  for (int i = 0; i < 4; i++) {
+    const Moteur &m = moteurs[i];
+    Serial.printf("  %-18s PWM=GPIO%-2d IN1=GPIO%-2d IN2=GPIO%-2d  enc A=GPIO%d B=GPIO%d\n",
+                  m.nom, m.pwm, m.in1, m.in2,
+                  encodeurs[i].pinA, encodeurs[i].pinB);
+  }
+  Serial.println("  STBY=GPIO16 (2 x TB6612FNG)  - droit #1 : M1/M3, gauche #2 : M2/M4");
+  Serial.println("  Inversions logicielles : IN1/IN2 de M1 et M4, phases A/B de M2 et M4");
+  Serial.printf("  Encodeurs : %.0f impulsions/tour, %.3f mm/impulsion\n",
+                IMPULSIONS_PAR_TOUR, MM_PAR_IMPULSION);
+
+  Serial.print("  Niveaux encodeurs au repos (A,B) :");
+  for (int i = 0; i < 4; i++)
+    Serial.printf(" %d,%d", digitalRead(encodeurs[i].pinA),
+                  digitalRead(encodeurs[i].pinB));
+  Serial.println();
+}
+
+void afficherCapteurs() {
+  Serial.println("--- Capteurs de distance ---");
+  for (int i = 0; i < 4; i++) {
+    const CapteurToF &c = capteurs[i];
+    Serial.printf("  canal %d  %-8s %s  ", i, c.nom, c.modele);
+    if (!c.present)  Serial.println("ABSENT");
+    else if (!c.fiable) Serial.println("present, NON FIABLE (ignore pour decider)");
+    else Serial.printf("OK, portee %d mm\n", c.porteeMm);
+  }
 }
 
 // ================== ARRET ==================
@@ -343,12 +583,11 @@ void arretDefinitif(const char* raison) {
 // Prepare la rotation : mesure les cotes, choisit la direction,
 // fixe le cap cible et lance le mouvement.
 void lancerRotation() {
-  int dGauche = lireVL53L0X(tofGauche, CANAL_GAUCHE, presentGauche);
-  int dDroite = lireVL53L0X(tofDroite, CANAL_DROITE, presentDroite);
+  int dGauche = lireCapteur(CANAL_GAUCHE);
+  int dDroite = lireCapteur(CANAL_DROITE);
 
-  Serial.print("  gauche = "); Serial.print(dGauche);
-  Serial.print(" mm   droite = "); Serial.print(dDroite);
-  Serial.println(" mm");
+  imprimerMesure(CANAL_GAUCHE);
+  imprimerMesure(CANAL_DROITE);
 
   if (dGauche > 0 && dDroite > 0) {
     virageADroite = (dDroite > dGauche);
@@ -388,8 +627,11 @@ const char* nomEtat(Etat e) {
   return "?";
 }
 
-// Une ligne par periode, format cle=valeur, facile a lire ou a parser.
-// Distances : derniere valeur lue (-1 = absente/invalide/pas encore lue).
+// Une ligne par periode, format cle=valeur.
+// Distances en mm, derniere valeur lue : ">1200" = rien dans la
+// portee, ERR = timeout, ABS = absent, -- = pas encore lu,
+// NF: = capteur non fiable (valeur brute, ignoree pour decider).
+// Vitesses par roue en mm/s, positif = vers l'avant.
 void envoyerDebug() {
   if (DEBUG_PERIODE_MS == 0) return;
   unsigned long maintenant = millis();
@@ -402,13 +644,25 @@ void envoyerDebug() {
   for (int i = 0; i < 4; i++) comptes[i] = encodeurs[i].compte;
   interrupts();
 
+  int vitesse[4];
+  for (int i = 0; i < 4; i++) {
+    vitesse[i] = (comptes[i] - comptesDebugPrec[i]) * MM_PAR_IMPULSION * 1000.0 / ecart;
+    comptesDebugPrec[i] = comptes[i];
+  }
+
+  char av[64], ar[16], dr[16], ga[16];
+  texteMesure(CANAL_AVANT, av, sizeof(av));
+  texteMesure(CANAL_ARRIERE, ar, sizeof(ar));
+  texteMesure(CANAL_DROITE, dr, sizeof(dr));
+  texteMesure(CANAL_GAUCHE, ga, sizeof(ga));
+
   Serial.printf(
-      "[DBG] t=%lu etat=%s av=%d ar=%d dr=%d ga=%d cap=%.1f cible=%.1f "
-      "enc=%ld,%ld,%ld,%ld obst=%d annul=%d boucle_hz=%lu\n",
-      maintenant / 1000, nomEtat(etat),
-      derniereDistance[CANAL_AVANT], derniereDistance[CANAL_ARRIERE],
-      derniereDistance[CANAL_DROITE], derniereDistance[CANAL_GAUCHE],
+      "[DBG] t=%lu etat=%s av=%s ar=%s dr=%s ga=%s cap=%.1f cible=%.1f "
+      "v_M1=%d v_M3=%d v_M2=%d v_M4=%d enc=%ld,%ld,%ld,%ld "
+      "obst=%d annul=%d boucle_hz=%lu\n",
+      maintenant / 1000, nomEtat(etat), av, ar, dr, ga,
       cap, capCible,
+      vitesse[0], vitesse[1], vitesse[2], vitesse[3],
       comptes[0], comptes[1], comptes[2], comptes[3],
       nbObstacles, nbReculsAnnules,
       nbBoucles * 1000UL / ecart);
@@ -417,11 +671,19 @@ void envoyerDebug() {
 
 // ================== PROGRAMME ==================
 
+void initVL53L0X(VL53L0X &capteur, uint8_t canal) {
+  choisirCanal(canal);
+  capteur.setBus(&Wire);
+  capteur.setTimeout(200);
+  if (capteur.init()) {
+    capteur.startContinuous();
+    capteurs[canal].present = true;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
-
-  couleurLed(20, 20, 20);
 
   // --- Moteurs ---
   pinMode(STBY_PIN, OUTPUT);
@@ -455,6 +717,13 @@ void setup() {
   Serial.println("   EVITEMENT - 4 CAPTEURS - MODE AUTONOME");
   Serial.println("================================================");
   Serial.println();
+  Serial.println("=========== INVENTAIRE MATERIEL ===========");
+
+  bool muxPresent = false;
+  scannerBusPrincipal(muxPresent);
+  scannerCanauxMux(muxPresent);
+  verifierIMU();
+  afficherCablageFixe();
 
   // --- Capteurs de distance ---
   choisirCanal(CANAL_AVANT);
@@ -464,53 +733,28 @@ void setup() {
     tofAvant.setDistanceMode(VL53L1X::Long);
     tofAvant.setMeasurementTimingBudget(50000);
     tofAvant.startContinuous(50);
-    presentAvant = true;
-    Serial.println("  Canal 0 : VL53L1X avant     OK");
-  } else {
-    Serial.println("  Canal 0 : VL53L1X avant     ABSENT");
+    capteurs[CANAL_AVANT].present = true;
   }
+  initVL53L0X(tofArriere, CANAL_ARRIERE);
+  initVL53L0X(tofDroite, CANAL_DROITE);
+  initVL53L0X(tofGauche, CANAL_GAUCHE);
+  afficherCapteurs();
 
-  choisirCanal(CANAL_ARRIERE);
-  tofArriere.setBus(&Wire);
-  tofArriere.setTimeout(200);
-  if (tofArriere.init()) {
-    tofArriere.startContinuous();
-    presentArriere = true;
-    Serial.println("  Canal 1 : VL53L0X arriere   OK");
-  } else {
-    Serial.println("  Canal 1 : VL53L0X arriere   absent");
+  // Premiere mesure de chaque capteur, pour verifier qu'ils repondent
+  Serial.println("--- Premiere mesure ---");
+  for (uint8_t c = 0; c < 4; c++) {
+    lireCapteur(c);
+    imprimerMesure(c);
   }
-
-  choisirCanal(CANAL_DROITE);
-  tofDroite.setBus(&Wire);
-  tofDroite.setTimeout(200);
-  if (tofDroite.init()) {
-    tofDroite.startContinuous();
-    presentDroite = true;
-    Serial.println("  Canal 2 : VL53L0X droite    OK");
-  } else {
-    Serial.println("  Canal 2 : VL53L0X droite    absent");
-  }
-
-  choisirCanal(CANAL_GAUCHE);
-  tofGauche.setBus(&Wire);
-  tofGauche.setTimeout(200);
-  if (tofGauche.init()) {
-    tofGauche.startContinuous();
-    presentGauche = true;
-    Serial.println("  Canal 3 : VL53L0X gauche    OK");
-  } else {
-    Serial.println("  Canal 3 : VL53L0X gauche    absent");
-  }
+  Serial.println("===========================================");
   Serial.println();
 
-  if (!presentAvant) {
+  if (!capteurs[CANAL_AVANT].present) {
     Serial.println("!! CAPTEUR AVANT ABSENT - DEMARRAGE ANNULE.");
-    couleurLed(60, 0, 0);
     while (true) delay(1000);
   }
 
-  if (!presentArriere) {
+  if (!capteurs[CANAL_ARRIERE].present) {
     Serial.println("  Note : sans capteur arriere, le recul se fera");
     Serial.println("  a l'aveugle comme dans la version precedente.");
     Serial.println();
@@ -520,8 +764,9 @@ void setup() {
   if (IMU.init(calib, ADRESSE_IMU) != 0) {
     Serial.println("  MPU-6500 absent : virages moins precis.");
   } else {
+    imuPresent = true;
     IMU.setGyroRange(250);
-    Serial.println("  MPU-6500                    OK");
+    Serial.println("  MPU-6500                    OK (+/-250 deg/s)");
     delay(300);
     calibrerGyro();
   }
@@ -538,17 +783,12 @@ void setup() {
   for (int s = COMPTE_A_REBOURS_S; s > 0; s--) {
     Serial.print("  ");
     Serial.println(s);
-    couleurLed(40, 30, 0);
-    delay(500);
-    couleurLed(0, 0, 0);
-    delay(500);
+    delay(1000);
   }
 
   Serial.println();
   Serial.println(">>> DEPART");
   Serial.println();
-
-  couleurLed(0, 40, 0);
 
   digitalWrite(STBY_PIN, HIGH);
   remettreCompteursAZero();
@@ -565,7 +805,6 @@ void loop() {
   envoyerDebug();
 
   if (etat == E_FIN) {
-    couleurLed(60, 0, 0);
     delay(500);
     return;
   }
@@ -597,7 +836,6 @@ void loop() {
         Serial.println(" mm");
 
         arreterTout();
-        couleurLed(40, 20, 0);
         etat = E_ARRET_COMPLET;
         horodatageEtat = millis();
       }
@@ -616,7 +854,7 @@ void loop() {
       // NOUVEAU : on regarde derriere AVANT de reculer.
       int dArriere = lireArriere();
 
-      if (!presentArriere) {
+      if (!capteurs[CANAL_ARRIERE].present) {
         // Pas de capteur : comportement de l'ancienne version
         reculPossible = true;
       } else if (dArriere < 0) {
@@ -624,9 +862,7 @@ void loop() {
         reculPossible = false;
         Serial.println("  arriere : lecture invalide, recul annule");
       } else {
-        Serial.print("  arriere = ");
-        Serial.print(dArriere);
-        Serial.println(" mm");
+        imprimerMesure(CANAL_ARRIERE);
         // Il faut la place de reculer, plus une marge de securite
         reculPossible = (dArriere > (RECUL_CM * 10 + SEUIL_ARRIERE_MM));
       }
@@ -648,7 +884,7 @@ void loop() {
     case E_RECULE: {
       // NOUVEAU : surveillance permanente pendant le recul.
       int dArriere = lireArriere();
-      if (presentArriere && dArriere > 0 && dArriere < SEUIL_ARRIERE_MM) {
+      if (dArriere > 0 && dArriere < SEUIL_ARRIERE_MM) {
         arreterTout();
         Serial.print("  obstacle arriere a ");
         Serial.print(dArriere);
@@ -689,7 +925,6 @@ void loop() {
 
         delay(200);
         remettreCompteursAZero();
-        couleurLed(0, 40, 0);
         avancer(VITESSE_AVANCE);
         etat = E_AVANCE;
         horodatageEtat = millis();
@@ -737,12 +972,15 @@ void loop() {
  *                     reculer ; augmenter s'il frotte un mur.
  *   ANGLE_VIRAGE_DEG  70 deg. Augmenter s'il retrouve le meme
  *                     obstacle apres avoir tourne.
+ *   capteurs[].fiable Passer a true le capteur droit une fois
+ *                     remplace (Suivi n.54).
  *
  * ============================================================
  * LIMITE CONNUE
  * ============================================================
  * Le rover ne roule toujours pas droit : 4,5 % d'ecart entre les
  * cotes droit et gauche. La correction demande un asservissement
- * des encodeurs - etape suivante.
+ * des encodeurs - etape suivante. Les vitesses v_M1..v_M4 du debug
+ * permettent de mesurer cet ecart en roulant.
  * ============================================================
  */
