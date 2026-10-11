@@ -4,19 +4,27 @@
 #include "Config.h"
 #include "Couleur.h"
 #include "Distance.h"
+#include "Gyro.h"
 #include "Moteurs.h"
 #include "Telemetrie.h"
 
 static const float SEUIL_LIGNE = 0.35;            // somme des noirceurs : en dessous, ligne perdue
 static const float SEUIL_COTE = 0.15;             // |position| pour retenir le dernier cote vu
-static const unsigned long DELAI_PERDUE_MS = 1500;
 static const unsigned long PERIODE_REGULATION_MS = 25;   // ~ une mesure couleur
 static const int DISTANCE_OBSTACLE_MM = 150;
 static const int DISTANCE_REPRISE_MM = 220;
 static const unsigned long DUREE_CALIBRATION_MS = 4000;
 static const float CONTRASTE_MIN = 1.3;           // sol / ligne, sur le canal clair
 
-static InfoLigne info = { L_ARRET, 0, { 0, 0, 0 }, false, 80, 4, 90 };
+// ---------- recherche de la ligne perdue ----------
+static const unsigned long GRACE_MS = 150;        // tout droit : petites coupures
+static const unsigned long MAX_RECHERCHE_MS = 12000;
+static const unsigned long MAX_ETAPE_MS = 4000;
+static const float TOLERANCE_CAP_DEG = 4;
+static const int ARRIERE_STOP_MM = 120;
+static const float MS_PAR_DEGRE_SANS_GYRO = 12;   // estimation si gyroscope absent
+
+static InfoLigne info = { L_ARRET, 0, { 0, 0, 0 }, false, 80, 4, 90, true, R_TOUTES, 0, 0 };
 static uint16_t blanc[3], noir[3];                // canal clair C : sol et ligne
 static uint16_t calMin[3], calMax[3];
 static float positionPrec = 0;
@@ -24,11 +32,20 @@ static float dernierCote = 1;
 static unsigned long dernierPas = 0, debutPerdue = 0, debutCalibration = 0;
 static Preferences prefs;
 
+enum TypeEtape : uint8_t { ET_RECUL, ET_CAP };
+struct Etape { TypeEtape type; float valeur; };   // RECUL : cm ; CAP : degres depuis la perte
+static Etape etapes[8];
+static float capPerte = 0, offsetSansGyro = 0;
+static unsigned long debutRecherche = 0, debutEtape = 0;
+static bool etapeCommencee = false;
+
 void suiviLigneInit() {
   prefs.begin("ligne", false);
   info.kp = prefs.getFloat("kp", 80);
   info.kd = prefs.getFloat("kd", 4);
   info.vitesse = prefs.getInt("v", 90);
+  info.recherche = prefs.getBool("rech", true);
+  info.strategie = prefs.getUChar("strat", R_TOUTES);
   info.calibre = prefs.isKey("blanc") && prefs.isKey("noir") &&
                  prefs.getBytes("blanc", blanc, sizeof(blanc)) == sizeof(blanc) &&
                  prefs.getBytes("noir", noir, sizeof(noir)) == sizeof(noir);
@@ -68,7 +85,8 @@ void suiviLigneDemarrer() {
   dernierPas = millis();
   moteursActiver(true);
   info.etat = L_SUIT;
-  journal("[LIGNE] suivi demarre (v=%d kp=%.0f kd=%.1f)", info.vitesse, info.kp, info.kd);
+  journal("[LIGNE] suivi demarre (v=%d kp=%.0f kd=%.1f, recherche %s)", info.vitesse,
+          info.kp, info.kd, info.recherche ? suiviLigneNomStrategie(info.strategie) : "desactivee");
 }
 
 void suiviLigneCalibrer() {
@@ -107,6 +125,111 @@ void suiviLigneReglages(float kp, float kd, int vitesse) {
   prefs.putInt("v", info.vitesse);
   journal("[LIGNE] reglages : v=%d kp=%.0f kd=%.1f", info.vitesse, info.kp, info.kd);
 }
+
+void suiviLigneRecherche(bool active, int strategie) {
+  info.recherche = active;
+  info.strategie = constrain(strategie, (int) R_PIVOT, (int) R_TOUTES);
+  prefs.putBool("rech", info.recherche);
+  prefs.putUChar("strat", info.strategie);
+  journal("[LIGNE] recherche de ligne %s (%s)", active ? "activee" : "desactivee",
+          suiviLigneNomStrategie(info.strategie));
+}
+
+// ---------- recherche de la ligne ----------
+
+static void ajouterEtape(TypeEtape type, float valeur) {
+  if (info.nbEtapes < 8) etapes[info.nbEtapes++] = { type, valeur };
+}
+
+static void demarrerRecherche() {
+  // ligne vue a droite en dernier -> chercher d'abord a droite (cap negatif)
+  float s = dernierCote >= 0 ? -1 : 1;
+  info.nbEtapes = 0;
+  switch (info.strategie) {
+    case R_PIVOT:
+      ajouterEtape(ET_CAP, s * 120);
+      break;
+    case R_RECUL:
+      ajouterEtape(ET_RECUL, 10);
+      ajouterEtape(ET_CAP, s * 90);
+      ajouterEtape(ET_CAP, -s * 90);
+      break;
+    case R_BALAYAGE:
+      ajouterEtape(ET_CAP, s * 35);
+      ajouterEtape(ET_CAP, -s * 35);
+      ajouterEtape(ET_CAP, s * 80);
+      ajouterEtape(ET_CAP, -s * 80);
+      ajouterEtape(ET_CAP, s * 170);
+      break;
+    default:   // R_TOUTES
+      ajouterEtape(ET_CAP, s * 60);
+      ajouterEtape(ET_CAP, 0);
+      ajouterEtape(ET_RECUL, 8);
+      ajouterEtape(ET_CAP, -s * 80);
+      ajouterEtape(ET_CAP, s * 80);
+      ajouterEtape(ET_CAP, s * 170);
+      break;
+  }
+  info.etape = 0;
+  capPerte = gyroCap();
+  offsetSansGyro = 0;
+  debutRecherche = debutEtape = millis();
+  etapeCommencee = false;
+  info.etat = L_RECHERCHE;
+  journal("[LIGNE] ligne perdue : recherche %s", suiviLigneNomStrategie(info.strategie));
+}
+
+static void executerRecherche(unsigned long maintenant) {
+  if (maintenant - debutRecherche > MAX_RECHERCHE_MS || info.etape >= info.nbEtapes) {
+    suiviLigneArreter("[LIGNE] ligne introuvable apres recherche, arret");
+    return;
+  }
+  const Etape &e = etapes[info.etape];
+  int v = constrain((int) (info.vitesse * 0.8), 70, 140);
+  bool fini = false;
+
+  if (!etapeCommencee) {
+    etapeCommencee = true;
+    debutEtape = maintenant;
+    if (e.type == ET_RECUL) moteursRemettreAZero();
+  }
+
+  if (e.type == ET_RECUL) {
+    int ar = distanceUtile(CANAL_ARRIERE);
+    float cm = compteMoyen() / IMPULSIONS_PAR_TOUR * CIRCONFERENCE_CM;
+    if (cm >= e.valeur || (ar >= 0 && ar < ARRIERE_STOP_MM) || maintenant - debutEtape > 3000)
+      fini = true;
+    else
+      reculer(v);
+  } else if (gyroPresent()) {
+    float ecart = (capPerte + e.valeur) - gyroCap();   // > 0 : tourner a gauche
+    if (fabsf(ecart) < TOLERANCE_CAP_DEG || maintenant - debutEtape > MAX_ETAPE_MS) {
+      fini = true;
+    } else {
+      int vt = constrain((int) (2.5 * fabsf(ecart)), 70, v);
+      if (ecart > 0) tournerGauche(vt); else tournerDroite(vt);
+    }
+  } else {
+    // sans gyroscope : duree estimee du pivot
+    float delta = e.valeur - offsetSansGyro;
+    if (maintenant - debutEtape > fabsf(delta) * MS_PAR_DEGRE_SANS_GYRO) {
+      fini = true;
+      offsetSansGyro = e.valeur;
+    } else if (delta > 0) {
+      tournerGauche(v);
+    } else {
+      tournerDroite(v);
+    }
+  }
+
+  if (fini) {
+    moteursStop();
+    info.etape++;
+    etapeCommencee = false;
+  }
+}
+
+// ---------- boucle ----------
 
 void suiviLigneMettreAJour() {
   unsigned long maintenant = millis();
@@ -147,18 +270,31 @@ void suiviLigneMettreAJour() {
   float dt = (maintenant - dernierPas) / 1000.0;
   dernierPas = maintenant;
 
-  // Ligne perdue : on pivote vers le dernier cote ou on l'a vue
+  // ---- ligne absente ----
   if (somme < SEUIL_LIGNE) {
-    if (info.etat != L_PERDUE) { info.etat = L_PERDUE; debutPerdue = maintenant; }
-    if (maintenant - debutPerdue > DELAI_PERDUE_MS) {
-      suiviLigneArreter("[LIGNE] ligne perdue, arret");
-      return;
+    if (info.etat == L_SUIT) {
+      info.etat = L_PERDUE;
+      debutPerdue = maintenant;
     }
-    int v = info.vitesse * 0.8;
-    if (dernierCote >= 0) tournerDroite(v); else tournerGauche(v);
+    if (info.etat == L_PERDUE) {
+      if (maintenant - debutPerdue < GRACE_MS) {
+        int v = info.vitesse * 0.7;
+        moteursCotes(v, v);
+        return;
+      }
+      if (!info.recherche) {
+        suiviLigneArreter("[LIGNE] ligne perdue, arret (recherche desactivee)");
+        return;
+      }
+      demarrerRecherche();
+    }
+    executerRecherche(maintenant);
     return;
   }
-  if (info.etat == L_PERDUE) {
+
+  // ---- ligne visible ----
+  if (info.etat == L_RECHERCHE) journal("[LIGNE] ligne retrouvee");
+  if (info.etat == L_PERDUE || info.etat == L_RECHERCHE) {
     info.etat = L_SUIT;
     positionPrec = info.position;
   }
@@ -182,8 +318,18 @@ const char* suiviLigneNomEtat() {
     case L_ARRET:       return "ARRET";
     case L_SUIT:        return "SUIT";
     case L_PERDUE:      return "PERDUE";
+    case L_RECHERCHE:   return "RECHERCHE";
     case L_OBSTACLE:    return "OBSTACLE";
     case L_CALIBRATION: return "CALIBRATION";
   }
   return "?";
+}
+
+const char* suiviLigneNomStrategie(uint8_t strategie) {
+  switch (strategie) {
+    case R_PIVOT:    return "PIVOT";
+    case R_RECUL:    return "RECUL";
+    case R_BALAYAGE: return "BALAYAGE";
+    default:         return "TOUTES";
+  }
 }

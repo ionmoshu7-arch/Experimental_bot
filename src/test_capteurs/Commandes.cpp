@@ -56,6 +56,8 @@ static void executerLigne(Lecteur &l) {
     navigationVitesse(v[0]);
   } else if (cmd == 'K' && l.lg == 1) {
     suiviLigneCalibrer();
+  } else if (cmd == 'R' && sscanf(args, "%d %d", &v[0], &v[1]) == 2) {
+    suiviLigneRecherche(v[0] != 0, v[1]);
   } else if (cmd == 'P' && sscanf(args, "%f %f %d", &kp, &kd, &v[0]) == 3) {
     suiviLigneReglages(kp, kd, v[0]);
   } else if (l.lg) {

@@ -113,6 +113,10 @@
   .reglage { display: grid; grid-template-columns: 150px 1fr 44px; gap: 10px; align-items: center; margin: 4px 0; }
   .reglage input { padding: 0; accent-color: var(--accent); }
   .reglage b { text-align: right; }
+  .recherche { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+  .recherche select { width: 100%; margin-top: 8px; }
+  .interrupteur { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+  .interrupteur input { width: 18px; height: 18px; accent-color: var(--accent); }
   .posbar { position: relative; height: 26px; background: var(--track); border-radius: 13px; margin: 12px 0 4px; }
   .poscentre { position: absolute; left: 50%; top: 4px; bottom: 4px; width: 2px; background: var(--border); }
   .posmark {
@@ -244,6 +248,16 @@
           <div class="reglage"><label for="lgKp">Kp (correction)</label><input type="range" id="lgKp" min="0" max="250" step="5" value="80"><b class="num" id="lgKpv">80</b></div>
           <div class="reglage"><label for="lgKd">Kd (amortissement)</label><input type="range" id="lgKd" min="0" max="20" step="0.5" value="4"><b class="num" id="lgKdv">4</b></div>
           <p class="small muted" style="margin:6px 0 0">Le rover zigzague : baisser Kp ou monter Kd. Il sort dans les virages : monter Kp ou baisser la vitesse.</p>
+          <div class="recherche">
+            <label class="interrupteur"><input type="checkbox" id="lgRech" checked> Rechercher la ligne si elle est perdue</label>
+            <select id="lgStrat" aria-label="Strategie de recherche">
+              <option value="0">Pivot vers le dernier cote vu</option>
+              <option value="1">Marche arriere puis pivot</option>
+              <option value="2">Balayage gauche-droite (gyroscope)</option>
+              <option value="3">Toutes, enchainees</option>
+            </select>
+            <p class="small muted" style="margin:6px 0 0">Desactivee : le rover s'arrete des que la ligne est perdue. La recherche abandonne apres 12 s.</p>
+          </div>
         </div>
         <div>
           <div class="mot-tete"><span class="muted">Etat</span><b id="lgEtat" class="big" style="font-size:22px">--</b></div>
@@ -276,8 +290,10 @@
           <p class="small muted" style="margin:8px 0 0">
             Lignes droites tenues au gyroscope, virages a l'angle exact. Devant un obstacle : ralentit,
             s'arrete, recule s'il est tres pres, puis tourne vers le cote le plus degage.
-            Collision detectee par un choc (accelerometre) ou des roues bloquees : arret, recul, virage.
-            Arret : ce bouton, STOP ou Espace.
+            Collisions invisibles aux capteurs (pied de chaise...) detectees par un choc a l'accelerometre,
+            un cote qui freine aux encodeurs, ou le rover pousse hors de son cap au gyroscope :
+            arret, recul, virage du cote oppose a l'impact. Collisions repetees : grand recul et demi-tour ;
+            s'il reste coince, il s'arrete. Arret : ce bouton, STOP ou Espace.
           </p>
         </div>
         <div>
@@ -287,6 +303,7 @@
             <div class="stat"><span class="small muted">Cap vise</span><b class="num" id="navCible">--</b></div>
             <div class="stat"><span class="small muted">Obstacles evites</span><b class="num" id="navObst">0</b></div>
             <div class="stat"><span class="small muted">Collisions</span><b class="num" id="navCol">0</b></div>
+            <div class="stat" title="Vitesse normale des roues par unite de consigne, apprise en roulant. Sert a detecter un cote freine."><span class="small muted">Detection blocage</span><b class="num" id="navRend" style="font-size:14px">--</b></div>
           </div>
           <p class="small muted" style="margin:8px 0 0">Dernier evenement : <b id="navEv">--</b></p>
         </div>
@@ -984,14 +1001,24 @@
   // ---------- suivi de ligne ----------
   let etatLigne = "ARRET", reglageTouche = 0, minuteurReglage = null;
   const NOMS_LIGNE = { ARRET: "Arret", SUIT: "Suit la ligne", PERDUE: "Ligne perdue...",
-                       OBSTACLE: "Obstacle : pause", CALIBRATION: "Calibration..." };
+                       RECHERCHE: "Recherche de la ligne", OBSTACLE: "Obstacle : pause",
+                       CALIBRATION: "Calibration..." };
+  const EN_MARCHE = ["SUIT", "PERDUE", "RECHERCHE", "OBSTACLE"];
+  let rechercheTouchee = 0;
   const REGLAGES = [["lgV", "v", 0], ["lgKp", "kp", 0], ["lgKd", "kd", 1]];
 
   function afficherLigne(l) {
     if (!l) return;
     etatLigne = l.e;
-    setTxt($("lgEtat"), NOMS_LIGNE[l.e] || l.e);
-    const enMarche = l.e === "SUIT" || l.e === "PERDUE" || l.e === "OBSTACLE";
+    let nomEtat = NOMS_LIGNE[l.e] || l.e;
+    if (l.e === "RECHERCHE" && l.nbEtapes) nomEtat += ` (${Math.min(l.etape + 1, l.nbEtapes)}/${l.nbEtapes})`;
+    setTxt($("lgEtat"), nomEtat);
+    const enMarche = EN_MARCHE.includes(l.e);
+    if (l.rech !== undefined && performance.now() - rechercheTouchee > 1500) {
+      $("lgRech").checked = !!l.rech;
+      if ($("lgStrat").value != l.strat) $("lgStrat").value = l.strat;
+      $("lgStrat").disabled = !l.rech;
+    }
     const bl = $("btnLigne");
     setTxt(bl, enMarche ? "Arreter le suivi" : "Demarrer le suivi");
     bl.classList.toggle("stop", enMarche);
@@ -1017,8 +1044,16 @@
     }
   }
 
+  function envoyerRecherche() {
+    rechercheTouchee = performance.now();
+    $("lgStrat").disabled = !$("lgRech").checked;
+    envoyer(`R ${$("lgRech").checked ? 1 : 0} ${$("lgStrat").value}\n`);
+  }
+  $("lgRech").addEventListener("change", envoyerRecherche);
+  $("lgStrat").addEventListener("change", envoyerRecherche);
+
   $("btnLigne").onclick = () => {
-    if (etatLigne === "SUIT" || etatLigne === "PERDUE" || etatLigne === "OBSTACLE") {
+    if (EN_MARCHE.includes(etatLigne)) {
       envoyer("L 0\n");
     } else {
       // pas de commande manuelle en parallele : elle arreterait le suivi
@@ -1047,6 +1082,8 @@
     setTxt($("navObst"), String(n.obst));
     setTxt($("navCol"), String(n.col));
     setTxt($("navEv"), n.ev || "--");
+    setTxt($("navRend"), n.rend > 0 ? `active (${n.rend.toFixed(2)})`
+                                    : actif ? "apprentissage..." : "apres 1 s de route");
     const aiguille = $("needleCible");
     aiguille.setAttribute("visibility", actif ? "visible" : "hidden");
     aiguille.setAttribute("transform", `rotate(${-n.cible})`);
@@ -1136,10 +1173,10 @@
         imu: { cap: capD, gx: .1, gy: -.2, gz, ax: .01, ay: -.02, az: 1, temp: 31.4, biais: -.018 },
         mot: { stby: eff.some(v => v) ? 1 : 0, m },
         nav: { e: "AVANCE", cible: capD + 10, obst: Math.floor(s / 4), col: Math.floor(s / 9),
-               v: 110, ev: "obstacle" },
+               v: 110, ev: "obstacle", rend: s > 1 ? 2.1 : 0 },
         ligne: (() => {
           const pos = Math.sin(s / 2) * 0.8;
-          return { e: "SUIT", pos, cal: 1, kp: 80, kd: 4, v: 90,
+          return { e: "SUIT", pos, cal: 1, kp: 80, kd: 4, v: 90, rech: 1, strat: 3, etape: 0, nbEtapes: 0,
                    d: [Math.max(0, -pos), 1 - Math.abs(pos), Math.max(0, pos)] };
         })(),
       }));

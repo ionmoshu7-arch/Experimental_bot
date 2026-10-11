@@ -9,6 +9,8 @@
  *   L 1 / L 0 + Entree : demarrer / arreter le suivi de ligne
  *   K + Entree : calibration du suivi de ligne (4 s)
  *   P kp kd vitesse + Entree : reglages du suivi de ligne
+ *   R a s + Entree : recherche de ligne perdue, a = 1 active / 0 non,
+ *       s = 0 pivot, 1 recul, 2 balayage, 3 toutes
  *   N 1 / N 0 + Entree : demarrer / arreter la navigation autonome
  *   Q vitesse + Entree : vitesse de croisiere de la navigation
  *

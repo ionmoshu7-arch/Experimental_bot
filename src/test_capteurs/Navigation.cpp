@@ -7,7 +7,7 @@
 #include "Moteurs.h"
 #include "Telemetrie.h"
 
-// ---------- obstacles ----------
+// ---------- obstacles vus par les capteurs ----------
 static const int SEUIL_OBSTACLE_MM = 280;      // arret devant un obstacle
 static const int SEUIL_TRES_PRES_MM = 160;     // en dessous : recul avant de tourner
 static const int DEBUT_RALENTI_MM = 600;       // ralentit a partir de cette distance
@@ -24,32 +24,51 @@ static const int V_VIRAGE_MIN = 75, V_VIRAGE_MAX = 140;
 static const float TOLERANCE_VIRAGE_DEG = 3.0;
 
 // ---------- recul ----------
-static const float RECUL_CM = 10.0;
+static const float RECUL_CM = 12.0;
+static const float GRAND_RECUL_CM = 20.0;
 static const int ARRIERE_MIN_MM = 280;         // place necessaire pour reculer
 static const int ARRIERE_STOP_MM = 150;        // arret du recul
 static const int V_RECUL = 90;
 
-// ---------- collisions ----------
-static const float SEUIL_CHOC_G = 0.6;         // variation brutale d'acceleration horizontale
-static const int CONSIGNE_BLOCAGE_MIN = 60;    // moteurs vraiment commandes
-static const float VITESSE_BLOCAGE_MM_S = 20;  // ... mais roues quasi immobiles
-static const unsigned long DUREE_BLOCAGE_MS = 700;
-static const unsigned long IGNORE_DEPART_MS = 400;   // a-coup au demarrage d'une manoeuvre
+// ---------- collisions invisibles aux capteurs (pied de chaise...) ----------
+// 1. choc : variation brutale de l'acceleration horizontale
+static const float SEUIL_CHOC_G = 0.35;
+// 2. blocage : une roue (ou un cote) tourne beaucoup moins vite que
+//    d'habitude pour la meme consigne. "D'habitude" est appris en roulant.
+static const float RATIO_BLOCAGE = 0.35;       // < 35 % du rendement normal
+static const unsigned long DUREE_BLOCAGE_MS = 300;
+static const int CONSIGNE_MIN = 50;            // en dessous, rendement non mesure
+// 3. deviation : le rover est pousse hors de son cap en ligne droite
+static const float DEVIATION_MAX_DEG = 20;
+// 4. virage bloque : moteurs en rotation mais le gyroscope ne tourne pas
+static const float ROTATION_MIN_DEG_S = 8;
+static const unsigned long DUREE_VIRAGE_BLOQUE_MS = 700;
 
+static const unsigned long IGNORE_DEPART_MS = 500;   // a-coup au debut d'une manoeuvre
 static const unsigned long PAUSE_MS = 300;
 static const unsigned long MAX_VIRAGE_MS = 5000;
 static const unsigned long MAX_RECUL_MS = 3000;
+// collisions repetees : on insiste, puis on abandonne
+static const int COLLISIONS_INSISTER = 3;      // en 15 s : grand recul + demi-tour
+static const int COLLISIONS_ABANDON = 6;       // en 30 s : arret, rover coince
 
-static InfoNav info = { N_ARRET, 0, 0, 0, 110, "" };
-static unsigned long debutEtat = 0, dernierPas = 0, debutBlocage = 0;
+static InfoNav info = { N_ARRET, 0, 0, 0, 110, "", 0 };
+static unsigned long debutEtat = 0, dernierPas = 0;
+static unsigned long debutBlocageD = 0, debutBlocageG = 0, debutVirageBloque = 0;
 static bool reculerEnsuite = false, grandVirage = false;
-static float accelBase = 0;
+static int coteImpact = 0;                     // +1 obstacle a droite, -1 a gauche, 0 inconnu
+static float distanceRecul = RECUL_CM;
+static float accelBaseX = 0, accelBaseY = 0;
 static bool accelInitialise = false;
+static float rendementRef = 0;                 // (mm/s) par unite de consigne, appris
+static int nbEchantillons = 0;
+static unsigned long instantsCollision[COLLISIONS_ABANDON];
+static int idxCollision = 0;
 
 static void changer(EtatNav e) {
   info.etat = e;
   debutEtat = dernierPas = millis();
-  debutBlocage = 0;
+  debutBlocageD = debutBlocageG = debutVirageBloque = 0;
 }
 
 void navigationArreter(const char* raison) {
@@ -67,6 +86,7 @@ void navigationDemarrer() {
   info.capCible = gyroCap();
   info.evenement = "depart";
   accelInitialise = false;
+  for (auto &t : instantsCollision) t = 0;
   moteursActiver(true);
   changer(N_AVANCE);
   journal("[NAV] navigation autonome demarree (vitesse %d)", info.vitesse);
@@ -77,43 +97,85 @@ void navigationVitesse(int vitesse) {
   journal("[NAV] vitesse %d", info.vitesse);
 }
 
-// Choc a l'accelerometre ou roues bloquees ; nullptr si rien
-static const char* detecterCollision(unsigned long maintenant) {
+// ---------- mesures ----------
+
+// Variation d'acceleration horizontale depuis la moyenne recente (g)
+static float mesurerChoc() {
   const AccelData &a = gyroAccel();
-  float h = sqrtf(a.accelX * a.accelX + a.accelY * a.accelY);
-  if (!accelInitialise) { accelBase = h; accelInitialise = true; }
-  float ecart = fabsf(h - accelBase);
-  accelBase += (h - accelBase) * 0.05;
-
-  if (maintenant - debutEtat < IGNORE_DEPART_MS) return nullptr;
-  if (ecart > SEUIL_CHOC_G) return "choc";
-
-  bool commande = false;
-  float vitesseMoy = 0;
-  for (auto &m : moteurs) {
-    if (abs(m.consigne) >= CONSIGNE_BLOCAGE_MIN) commande = true;
-    vitesseMoy += fabsf(m.vitesse);
+  if (!accelInitialise) {
+    accelBaseX = a.accelX; accelBaseY = a.accelY;
+    accelInitialise = true;
   }
-  vitesseMoy /= 4;
-  if (commande && vitesseMoy < VITESSE_BLOCAGE_MM_S) {
-    if (!debutBlocage) debutBlocage = maintenant;
-    else if (maintenant - debutBlocage > DUREE_BLOCAGE_MS) return "roues bloquees";
-  } else {
-    debutBlocage = 0;
-  }
-  return nullptr;
+  float dx = a.accelX - accelBaseX, dy = a.accelY - accelBaseY;
+  accelBaseX += dx * 0.05;
+  accelBaseY += dy * 0.05;
+  return sqrtf(dx * dx + dy * dy);
 }
 
-// Tourne vers le cote le plus degage (memes echelles : 25 cm max)
+// Vitesse mesuree et consigne d'un cote (droite : M1+M3, gauche : M2+M4)
+static void cote(bool droite, float &vitesse, float &consigne) {
+  const Moteur &a = moteurs[droite ? M1 : M2];
+  const Moteur &b = moteurs[droite ? M3 : M4];
+  vitesse = (a.vitesse + b.vitesse) / 2;
+  consigne = (a.consigne + b.consigne) / 2.0;
+}
+
+// Rendement = vitesse / consigne, ou -1 si la consigne est trop faible
+static float rendement(bool droite) {
+  float v, c;
+  cote(droite, v, c);
+  if (fabsf(c) < CONSIGNE_MIN) return -1;
+  return v / c;
+}
+
+// Apprend le rendement normal pendant qu'il roule librement
+static void apprendreRendement(float rD, float rG) {
+  if (rD <= 0 || rG <= 0) return;
+  float r = (rD + rG) / 2;
+  if (nbEchantillons < 40) {
+    rendementRef += (r - rendementRef) / (nbEchantillons + 1);
+    nbEchantillons++;
+  } else if (r > rendementRef * 0.6 && r < rendementRef * 1.6) {
+    rendementRef += (r - rendementRef) * 0.02;
+  }
+  info.rendement = nbEchantillons >= 40 ? rendementRef : 0;
+}
+
+static bool blocageCote(float r, unsigned long &debut, unsigned long maintenant) {
+  if (r >= 0 && r < rendementRef * RATIO_BLOCAGE) {
+    if (!debut) debut = maintenant;
+    return maintenant - debut > DUREE_BLOCAGE_MS;
+  }
+  debut = 0;
+  return false;
+}
+
+// Cote de l'obstacle d'apres la rotation subie : si l'avant droit
+// touche, la droite freine, la gauche pousse et le rover pivote a
+// droite (cap qui diminue, vitesse Z negative).
+static int coteDepuisRotation() {
+  float gz = gyroVitesseZ();
+  if (gz < -10) return +1;
+  if (gz > 10) return -1;
+  return 0;
+}
+
+// ---------- reactions ----------
+
 static void choisirVirage() {
-  int g = distanceUtile(CANAL_GAUCHE), d = distanceUtile(CANAL_DROITE);
-  int espaceG = g < 0 ? 0 : min(g, 250);
-  int espaceD = d < 0 ? 0 : min(d, 250);
-  bool aDroite = (abs(espaceG - espaceD) < 30) ? (random(2) == 1) : (espaceD > espaceG);
-  float angle = grandVirage ? random(110, 161) : random(60, 121);
+  bool aDroite;
+  if (coteImpact != 0) {
+    aDroite = coteImpact < 0;          // on s'eloigne du cote touche
+  } else {
+    int g = distanceUtile(CANAL_GAUCHE), d = distanceUtile(CANAL_DROITE);
+    int espaceG = g < 0 ? 0 : min(g, 250);   // meme echelle : portee droite 25 cm
+    int espaceD = d < 0 ? 0 : min(d, 250);
+    aDroite = (abs(espaceG - espaceD) < 30) ? (random(2) == 1) : (espaceD > espaceG);
+  }
+  float angle = grandVirage ? random(140, 181) : random(70, 111);
   info.capCible = gyroCap() + (aDroite ? -angle : angle);   // droite = negatif
-  journal("[NAV] virage %s de %.0f deg (gauche %d mm, droite %d mm)",
-          aDroite ? "a droite" : "a gauche", angle, g, d);
+  journal("[NAV] virage %s de %.0f deg", aDroite ? "a droite" : "a gauche", angle);
+  coteImpact = 0;
   changer(N_TOURNE);
 }
 
@@ -136,16 +198,38 @@ static void obstacle(int devant) {
   moteursStop();
   reculerEnsuite = devant < SEUIL_TRES_PRES_MM;
   grandVirage = false;
+  coteImpact = 0;
+  distanceRecul = RECUL_CM;
   changer(N_PAUSE);
 }
 
-static void collision(const char* cause) {
+static void collision(const char* cause, int cote) {
+  unsigned long maintenant = millis();
   info.collisions++;
   info.evenement = "COLLISION";
-  journal("[NAV] COLLISION #%d detectee : %s", info.collisions, cause);
+  instantsCollision[idxCollision] = maintenant;
+  idxCollision = (idxCollision + 1) % COLLISIONS_ABANDON;
+
+  int recentes15 = 0, recentes30 = 0;
+  for (auto t : instantsCollision) {
+    if (!t) continue;
+    if (maintenant - t < 15000) recentes15++;
+    if (maintenant - t < 30000) recentes30++;
+  }
+  journal("[NAV] COLLISION #%d : %s%s", info.collisions, cause,
+          cote > 0 ? " (obstacle a droite)" : cote < 0 ? " (obstacle a gauche)" : "");
   moteursStop();
+
+  if (recentes30 >= COLLISIONS_ABANDON) {
+    navigationArreter("[NAV] rover coince : trop de collisions, arret");
+    return;
+  }
+  bool insister = recentes15 >= COLLISIONS_INSISTER;
+  if (insister) journal("[NAV] collisions repetees : grand recul et demi-tour");
   reculerEnsuite = true;
-  grandVirage = true;
+  grandVirage = insister;
+  distanceRecul = insister ? GRAND_RECUL_CM : RECUL_CM;
+  coteImpact = insister ? 0 : cote;
   changer(N_PAUSE);
 }
 
@@ -158,11 +242,15 @@ static void roulerAuCap(float base) {
   moteursCotes((int) (base - correction), (int) (base + correction));
 }
 
+// ---------- boucle ----------
+
 void navigationMettreAJour() {
   if (info.etat == N_ARRET) return;
   unsigned long maintenant = millis();
   float dt = (maintenant - dernierPas) / 1000.0;
   dernierPas = maintenant;
+  float choc = mesurerChoc();   // toujours, pour suivre la moyenne
+  bool demarrage = maintenant - debutEtat < IGNORE_DEPART_MS;
 
   switch (info.etat) {
 
@@ -170,8 +258,26 @@ void navigationMettreAJour() {
       int devant = distanceUtile(CANAL_AVANT);
       if (devant < 0) { navigationArreter("[NAV] capteur avant sans mesure, arret"); return; }
       if (devant < SEUIL_OBSTACLE_MM) { obstacle(devant); return; }
-      const char* cause = detecterCollision(maintenant);
-      if (cause) { collision(cause); return; }
+
+      if (!demarrage) {
+        if (choc > SEUIL_CHOC_G) { collision("choc", coteDepuisRotation()); return; }
+
+        float ecart = gyroCap() - info.capCible;
+        if (fabsf(ecart) > DEVIATION_MAX_DEG) {
+          collision("pousse hors de son cap", ecart < 0 ? +1 : -1);
+          return;
+        }
+
+        float rD = rendement(true), rG = rendement(false);
+        if (nbEchantillons >= 40) {
+          bool bD = blocageCote(rD, debutBlocageD, maintenant);
+          bool bG = blocageCote(rG, debutBlocageG, maintenant);
+          if (bD && bG) { collision("roues bloquees", 0); return; }
+          if (bD)       { collision("cote droit freine", +1); return; }
+          if (bG)       { collision("cote gauche freine", -1); return; }
+        }
+        if (!debutBlocageD && !debutBlocageG) apprendreRendement(rD, rG);
+      }
 
       // mur trop proche sur un cote : le cap cible s'en ecarte
       int g = distanceUtile(CANAL_GAUCHE), d = distanceUtile(CANAL_DROITE);
@@ -196,14 +302,19 @@ void navigationMettreAJour() {
     case N_RECULE: {
       int ar = distanceUtile(CANAL_ARRIERE);
       float parcouruCm = compteMoyen() / IMPULSIONS_PAR_TOUR * CIRCONFERENCE_CM;
-      const char* cause = detecterCollision(maintenant);
-      if (cause) {
+      bool bloque = false;
+      if (!demarrage && nbEchantillons >= 40) {
+        bool bD = blocageCote(rendement(true), debutBlocageD, maintenant);
+        bool bG = blocageCote(rendement(false), debutBlocageG, maintenant);
+        bloque = (bD && bG) || choc > SEUIL_CHOC_G;
+      }
+      if (bloque) {
         info.collisions++;
         info.evenement = "COLLISION";
-        journal("[NAV] COLLISION #%d en reculant : %s", info.collisions, cause);
+        journal("[NAV] COLLISION #%d en reculant", info.collisions);
       }
-      if (cause || (ar >= 0 && ar < ARRIERE_STOP_MM) ||
-          parcouruCm >= RECUL_CM || maintenant - debutEtat > MAX_RECUL_MS) {
+      if (bloque || (ar >= 0 && ar < ARRIERE_STOP_MM) ||
+          parcouruCm >= distanceRecul || maintenant - debutEtat > MAX_RECUL_MS) {
         moteursStop();
         choisirVirage();
         return;
@@ -220,11 +331,17 @@ void navigationMettreAJour() {
         changer(N_AVANCE);   // garde exactement le cap vise
         return;
       }
-      const char* cause = detecterCollision(maintenant);
-      if (cause || maintenant - debutEtat > MAX_VIRAGE_MS) {
-        collision(cause ? cause : "virage impossible");
-        return;
+      // moteurs en rotation mais le rover ne pivote pas : il est coince
+      if (!demarrage && fabsf(gyroVitesseZ()) < ROTATION_MIN_DEG_S) {
+        if (!debutVirageBloque) debutVirageBloque = maintenant;
+        else if (maintenant - debutVirageBloque > DUREE_VIRAGE_BLOQUE_MS) {
+          collision("virage bloque", ecart > 0 ? -1 : +1);
+          return;
+        }
+      } else {
+        debutVirageBloque = 0;
       }
+      if (maintenant - debutEtat > MAX_VIRAGE_MS) { collision("virage trop long", 0); return; }
       int v = constrain((int) (KP_VIRAGE * fabsf(ecart)), V_VIRAGE_MIN, V_VIRAGE_MAX);
       if (ecart > 0) tournerGauche(v); else tournerDroite(v);
       break;

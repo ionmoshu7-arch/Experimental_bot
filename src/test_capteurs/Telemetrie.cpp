@@ -136,13 +136,16 @@ static void envoyerJson() {
 
   const InfoLigne &l = suiviLigneInfo();
   ajouter("]},\"ligne\":{\"e\":\"%s\",\"pos\":%.2f,\"d\":[%.2f,%.2f,%.2f],"
-          "\"cal\":%d,\"kp\":%.1f,\"kd\":%.2f,\"v\":%d}",
+          "\"cal\":%d,\"kp\":%.1f,\"kd\":%.2f,\"v\":%d,"
+          "\"rech\":%d,\"strat\":%d,\"etape\":%d,\"nbEtapes\":%d}",
           suiviLigneNomEtat(), l.position, l.noirceur[0], l.noirceur[1], l.noirceur[2],
-          l.calibre, l.kp, l.kd, l.vitesse);
+          l.calibre, l.kp, l.kd, l.vitesse,
+          l.recherche, l.strategie, l.etape, l.nbEtapes);
 
   const InfoNav &nv = navigationInfo();
-  ajouter(",\"nav\":{\"e\":\"%s\",\"cible\":%.1f,\"obst\":%d,\"col\":%d,\"v\":%d,\"ev\":\"%s\"}",
-          navigationNomEtat(), nv.capCible, nv.obstacles, nv.collisions, nv.vitesse, nv.evenement);
+  ajouter(",\"nav\":{\"e\":\"%s\",\"cible\":%.1f,\"obst\":%d,\"col\":%d,\"v\":%d,\"ev\":\"%s\",\"rend\":%.2f}",
+          navigationNomEtat(), nv.capCible, nv.obstacles, nv.collisions, nv.vitesse,
+          nv.evenement, nv.rendement);
 
   ajouter(",\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d}}",
           reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauNbClients());
