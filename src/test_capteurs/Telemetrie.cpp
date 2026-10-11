@@ -143,9 +143,10 @@ static void envoyerJson() {
           l.recherche, l.strategie, l.etape, l.nbEtapes);
 
   const InfoNav &nv = navigationInfo();
-  ajouter(",\"nav\":{\"e\":\"%s\",\"cible\":%.1f,\"obst\":%d,\"col\":%d,\"v\":%d,\"ev\":\"%s\",\"rend\":%.2f}",
+  ajouter(",\"nav\":{\"e\":\"%s\",\"cible\":%.1f,\"obst\":%d,\"col\":%d,\"v\":%d,\"ev\":\"%s\","
+          "\"rend\":%.2f,\"ess\":%d,\"essMax\":%d}",
           navigationNomEtat(), nv.capCible, nv.obstacles, nv.collisions, nv.vitesse,
-          nv.evenement, nv.rendement);
+          nv.evenement, nv.rendement, nv.essaiDegagement, nv.maxEssais);
 
   ajouter(",\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d}}",
           reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauNbClients());

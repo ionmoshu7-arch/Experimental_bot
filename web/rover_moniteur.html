@@ -292,8 +292,10 @@
             s'arrete, recule s'il est tres pres, puis tourne vers le cote le plus degage.
             Collisions invisibles aux capteurs (pied de chaise...) detectees par un choc a l'accelerometre,
             un cote qui freine aux encodeurs, ou le rover pousse hors de son cap au gyroscope :
-            arret, recul, virage du cote oppose a l'impact. Collisions repetees : grand recul et demi-tour ;
-            s'il reste coince, il s'arrete. Arret : ce bouton, STOP ou Espace.
+            arret, recul, virage du cote oppose a l'impact. Collisions repetees : grand recul et demi-tour.
+            Coince (6 collisions en 30 s) : degagement automatique — tour sur place pour trouver la direction
+            la plus libre, autre sens si le pivot bloque, secousses si besoin ; arret seulement apres 4 essais.
+            Arret : ce bouton, STOP ou Espace.
           </p>
         </div>
         <div>
@@ -1066,13 +1068,18 @@
   // ---------- navigation autonome ----------
   let etatNav = "ARRET", collisionsVues = null, minuteurAlerte = null, navTouche = 0;
   const NOMS_NAV = { ARRET: "Arret", AVANCE: "Avance (cap tenu)", PAUSE: "Pause",
-                     RECULE: "Recule", TOURNE: "Virage au gyroscope" };
+                     RECULE: "Recule", TOURNE: "Virage au gyroscope",
+                     DEGAGE_SCAN: "Degagement : cherche une sortie",
+                     DEGAGE_SECOUSSE: "Degagement : secousses" };
 
   function afficherNav(n, imu) {
     if (!n) return;
     etatNav = n.e;
     const actif = n.e !== "ARRET";
-    setTxt($("navEtat"), NOMS_NAV[n.e] || n.e);
+    let nomNav = NOMS_NAV[n.e] || n.e;
+    if (n.ess > 0) nomNav += ` (essai ${n.ess}/${n.essMax})`;
+    setTxt($("navEtat"), nomNav);
+    $("navEtat").style.color = n.ess > 0 ? "var(--warn)" : "";
     const b = $("btnNav");
     setTxt(b, actif ? "Arreter la navigation" : "Demarrer la navigation");
     b.classList.toggle("stop", actif);
@@ -1172,8 +1179,9 @@
         ],
         imu: { cap: capD, gx: .1, gy: -.2, gz, ax: .01, ay: -.02, az: 1, temp: 31.4, biais: -.018 },
         mot: { stby: eff.some(v => v) ? 1 : 0, m },
-        nav: { e: "AVANCE", cible: capD + 10, obst: Math.floor(s / 4), col: Math.floor(s / 9),
-               v: 110, ev: "obstacle", rend: s > 1 ? 2.1 : 0 },
+        nav: { e: s % 20 > 15 ? "DEGAGE_SCAN" : "AVANCE", cible: capD + 10, obst: Math.floor(s / 4),
+               col: Math.floor(s / 9), v: 110, ev: "obstacle", rend: s > 1 ? 2.1 : 0,
+               ess: s % 20 > 15 ? 1 : 0, essMax: 4 },
         ligne: (() => {
           const pos = Math.sin(s / 2) * 0.8;
           return { e: "SUIT", pos, cal: 1, kp: 80, kd: 4, v: 90, rech: 1, strat: 3, etape: 0, nbEtapes: 0,

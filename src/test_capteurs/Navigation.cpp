@@ -48,11 +48,23 @@ static const unsigned long IGNORE_DEPART_MS = 500;   // a-coup au debut d'une ma
 static const unsigned long PAUSE_MS = 300;
 static const unsigned long MAX_VIRAGE_MS = 5000;
 static const unsigned long MAX_RECUL_MS = 3000;
-// collisions repetees : on insiste, puis on abandonne
+// collisions repetees : on insiste, puis degagement
 static const int COLLISIONS_INSISTER = 3;      // en 15 s : grand recul + demi-tour
-static const int COLLISIONS_ABANDON = 6;       // en 30 s : arret, rover coince
+static const int COLLISIONS_ABANDON = 6;       // en 30 s : rover coince -> degagement
 
-static InfoNav info = { N_ARRET, 0, 0, 0, 110, "", 0 };
+// ---------- degagement ----------
+static const int SECTEURS = 24;                // tour complet par pas de 15 deg
+static const int V_SCAN = 85;
+static const unsigned long MAX_SCAN_MS = 12000;
+static const int SORTIE_MIN_MM = 350;          // distance libre pour une sortie
+static const int V_SECOUSSE = 200;             // plus de puissance pour se decoincer
+static const unsigned long PHASE_SECOUSSE_MS = 350;
+static const uint8_t SECOUSSE[] = { 0, 1, 0, 2, 0, 1, 0, 2 };   // 0 recule, 1 gauche, 2 droite
+static const int NB_PHASES_SECOUSSE = sizeof(SECOUSSE);
+static const int MAX_ESSAIS_DEGAGEMENT = 4;
+static const unsigned long ROUTE_LIBRE_MS = 3000;   // sans collision : degage
+
+static InfoNav info = { N_ARRET, 0, 0, 0, 110, "", 0, 0, MAX_ESSAIS_DEGAGEMENT };
 static unsigned long debutEtat = 0, dernierPas = 0;
 static unsigned long debutBlocageD = 0, debutBlocageG = 0, debutVirageBloque = 0;
 static bool reculerEnsuite = false, grandVirage = false;
@@ -64,6 +76,13 @@ static float rendementRef = 0;                 // (mm/s) par unite de consigne, 
 static int nbEchantillons = 0;
 static unsigned long instantsCollision[COLLISIONS_ABANDON];
 static int idxCollision = 0;
+
+static int scanDistance[SECTEURS];             // meilleure distance vue par secteur, -1 = rien
+static float scanDepart = 0;
+static int sensScan = 1;                       // +1 tourne a gauche, -1 a droite
+static bool scanInverse = false;
+static int phaseSecousse = 0;
+static unsigned long debutPhase = 0;
 
 static void changer(EtatNav e) {
   info.etat = e;
@@ -85,6 +104,7 @@ void navigationDemarrer() {
   if (info.etat != N_ARRET) return;
   info.capCible = gyroCap();
   info.evenement = "depart";
+  info.essaiDegagement = 0;
   accelInitialise = false;
   for (auto &t : instantsCollision) t = 0;
   moteursActiver(true);
@@ -191,6 +211,56 @@ static void commencerRecul() {
   changer(N_RECULE);
 }
 
+// ---------- degagement : le rover est coince ----------
+
+static void commencerScan() {
+  if (info.essaiDegagement >= MAX_ESSAIS_DEGAGEMENT) {
+    navigationArreter("[NAV] impossible de se degager apres 4 essais : aidez le rover");
+    return;
+  }
+  info.essaiDegagement++;
+  for (auto &d : scanDistance) d = -1;
+  scanDepart = gyroCap();
+  sensScan = random(2) ? 1 : -1;
+  scanInverse = false;
+  info.evenement = "DEGAGEMENT";
+  journal("[NAV] degagement, essai %d/%d : tour sur place pour trouver une sortie",
+          info.essaiDegagement, MAX_ESSAIS_DEGAGEMENT);
+  changer(N_DEGAGE_SCAN);
+}
+
+static void commencerSecousse(const char* raison) {
+  journal("[NAV] degagement : %s, secousses pour se decoincer", raison);
+  phaseSecousse = 0;
+  debutPhase = millis();
+  changer(N_DEGAGE_SECOUSSE);
+}
+
+static void commencerDegagement() {
+  for (auto &t : instantsCollision) t = 0;   // nouvel historique pour la suite
+  info.essaiDegagement = 0;
+  journal("[NAV] rover coince : degagement");
+  commencerScan();
+}
+
+// Fin du tour : part vers le secteur le plus degage
+static void choisirSortie() {
+  int meilleur = -1;
+  for (int s = 0; s < SECTEURS; s++)
+    if (scanDistance[s] > (meilleur < 0 ? -1 : scanDistance[meilleur])) meilleur = s;
+  if (meilleur < 0 || scanDistance[meilleur] < SORTIE_MIN_MM) {
+    commencerSecousse(meilleur < 0 ? "aucune mesure" : "aucune sortie assez large");
+    return;
+  }
+  float angle = (meilleur + 0.5) * (360.0 / SECTEURS);
+  // apres un tour complet : virage le plus court vers la sortie (-180..180)
+  float delta = fmodf(scanDepart + sensScan * angle - gyroCap() + 540.0f, 360.0f) - 180.0f;
+  info.capCible = gyroCap() + delta;
+  journal("[NAV] sortie trouvee a %.0f deg %s (%d mm libres)", angle > 180 ? 360 - angle : angle,
+          (sensScan > 0) == (angle <= 180) ? "a gauche" : "a droite", scanDistance[meilleur]);
+  changer(N_TOURNE);
+}
+
 static void obstacle(int devant) {
   info.obstacles++;
   info.evenement = "obstacle";
@@ -220,8 +290,13 @@ static void collision(const char* cause, int cote) {
           cote > 0 ? " (obstacle a droite)" : cote < 0 ? " (obstacle a gauche)" : "");
   moteursStop();
 
+  // deja en degagement : la sortie choisie est bouchee, essai suivant
+  if (info.essaiDegagement > 0) {
+    commencerSecousse("nouvelle collision");
+    return;
+  }
   if (recentes30 >= COLLISIONS_ABANDON) {
-    navigationArreter("[NAV] rover coince : trop de collisions, arret");
+    commencerDegagement();
     return;
   }
   bool insister = recentes15 >= COLLISIONS_INSISTER;
@@ -258,6 +333,13 @@ void navigationMettreAJour() {
       int devant = distanceUtile(CANAL_AVANT);
       if (devant < 0) { navigationArreter("[NAV] capteur avant sans mesure, arret"); return; }
       if (devant < SEUIL_OBSTACLE_MM) { obstacle(devant); return; }
+
+      // degagement reussi : 3 s de route sans collision
+      if (info.essaiDegagement > 0 && maintenant - debutEtat > ROUTE_LIBRE_MS) {
+        info.essaiDegagement = 0;
+        info.evenement = "degage";
+        journal("[NAV] rover degage, navigation normale");
+      }
 
       if (!demarrage) {
         if (choc > SEUIL_CHOC_G) { collision("choc", coteDepuisRotation()); return; }
@@ -347,6 +429,64 @@ void navigationMettreAJour() {
       break;
     }
 
+    case N_DEGAGE_SCAN: {
+      float tourne = (gyroCap() - scanDepart) * sensScan;   // degres parcourus
+      int devant = distanceUtile(CANAL_AVANT);
+      if (tourne >= 0 && tourne < 360 && devant >= 0) {
+        int s = (int) (tourne / (360.0 / SECTEURS)) % SECTEURS;
+        scanDistance[s] = max(scanDistance[s], devant);
+      }
+      if (tourne >= 360 || maintenant - debutEtat > MAX_SCAN_MS) {
+        moteursStop();
+        choisirSortie();
+        return;
+      }
+      // ne pivote pas : essaie dans l'autre sens, puis secousses
+      if (!demarrage && fabsf(gyroVitesseZ()) < ROTATION_MIN_DEG_S) {
+        if (!debutVirageBloque) debutVirageBloque = maintenant;
+        else if (maintenant - debutVirageBloque > DUREE_VIRAGE_BLOQUE_MS) {
+          moteursStop();
+          if (!scanInverse) {
+            journal("[NAV] degagement : pivot bloque, essai dans l'autre sens");
+            scanInverse = true;
+            sensScan = -sensScan;
+            scanDepart = gyroCap();
+            for (auto &d : scanDistance) d = -1;
+            changer(N_DEGAGE_SCAN);
+          } else {
+            commencerSecousse("pivot bloque des deux cotes");
+          }
+          return;
+        }
+      } else {
+        debutVirageBloque = 0;
+      }
+      if (sensScan > 0) tournerGauche(V_SCAN); else tournerDroite(V_SCAN);
+      break;
+    }
+
+    case N_DEGAGE_SECOUSSE: {
+      if (maintenant - debutPhase >= PHASE_SECOUSSE_MS) {
+        phaseSecousse++;
+        debutPhase = maintenant;
+      }
+      if (phaseSecousse >= NB_PHASES_SECOUSSE) {
+        moteursStop();
+        commencerScan();
+        return;
+      }
+      int ar = distanceUtile(CANAL_ARRIERE);
+      switch (SECOUSSE[phaseSecousse]) {
+        case 0:
+          if (tof[CANAL_ARRIERE].present && ar >= 0 && ar < ARRIERE_STOP_MM) moteursStop();
+          else reculer(V_SECOUSSE);
+          break;
+        case 1: tournerGauche(V_SECOUSSE); break;
+        default: tournerDroite(V_SECOUSSE); break;
+      }
+      break;
+    }
+
     default:
       break;
   }
@@ -362,6 +502,8 @@ const char* navigationNomEtat() {
     case N_PAUSE:  return "PAUSE";
     case N_RECULE: return "RECULE";
     case N_TOURNE: return "TOURNE";
+    case N_DEGAGE_SCAN:     return "DEGAGE_SCAN";
+    case N_DEGAGE_SECOUSSE: return "DEGAGE_SECOUSSE";
   }
   return "?";
 }
