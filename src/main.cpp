@@ -83,6 +83,7 @@ const float CIRCONFERENCE_CM = 6.7 * 3.14159265;
 
 const int COMPTE_A_REBOURS_S = 10;
 const int DUREE_MAX_MIN = 5;         // 0 pour desactiver
+const unsigned long DEBUG_PERIODE_MS = 500;  // 0 pour desactiver
 
 // ================== STRUCTURES ==================
 
@@ -160,6 +161,12 @@ bool virageADroite = true;
 bool reculPossible = true;
 int nbObstacles = 0;
 int nbReculsAnnules = 0;
+
+// Derniere distance lue par canal (-1 = jamais lue ou invalide).
+// Le debug affiche ces valeurs au lieu de refaire des mesures.
+int derniereDistance[4] = { -1, -1, -1, -1 };
+unsigned long dernierDebug = 0;
+unsigned long nbBoucles = 0;
 
 // ================== TEMOIN LUMINEUX ==================
 
@@ -266,7 +273,8 @@ int lireAvant() {
   if (!presentAvant) return -1;
   choisirCanal(CANAL_AVANT);
   int d = tofAvant.read();
-  if (tofAvant.timeoutOccurred()) return -1;
+  if (tofAvant.timeoutOccurred()) d = -1;
+  derniereDistance[CANAL_AVANT] = d;
   return d;
 }
 
@@ -274,7 +282,8 @@ int lireVL53L0X(VL53L0X &capteur, uint8_t canal, bool present) {
   if (!present) return -1;
   choisirCanal(canal);
   int d = capteur.readRangeContinuousMillimeters();
-  if (capteur.timeoutOccurred()) return -1;
+  if (capteur.timeoutOccurred()) d = -1;
+  derniereDistance[canal] = d;
   return d;
 }
 
@@ -362,6 +371,48 @@ void lancerRotation() {
 
   etat = E_TOURNE;
   horodatageEtat = millis();
+}
+
+// ================== DEBUG PERIODIQUE ==================
+
+const char* nomEtat(Etat e) {
+  switch (e) {
+    case E_AVANCE:          return "AVANCE";
+    case E_ARRET_COMPLET:   return "ARRET";
+    case E_VERIFIE_ARRIERE: return "VERIF_AR";
+    case E_RECULE:          return "RECULE";
+    case E_MESURE_COTES:    return "MESURE";
+    case E_TOURNE:          return "TOURNE";
+    case E_FIN:             return "FIN";
+  }
+  return "?";
+}
+
+// Une ligne par periode, format cle=valeur, facile a lire ou a parser.
+// Distances : derniere valeur lue (-1 = absente/invalide/pas encore lue).
+void envoyerDebug() {
+  if (DEBUG_PERIODE_MS == 0) return;
+  unsigned long maintenant = millis();
+  if (maintenant - dernierDebug < DEBUG_PERIODE_MS) return;
+  unsigned long ecart = maintenant - dernierDebug;
+  dernierDebug = maintenant;
+
+  long comptes[4];
+  noInterrupts();
+  for (int i = 0; i < 4; i++) comptes[i] = encodeurs[i].compte;
+  interrupts();
+
+  Serial.printf(
+      "[DBG] t=%lu etat=%s av=%d ar=%d dr=%d ga=%d cap=%.1f cible=%.1f "
+      "enc=%ld,%ld,%ld,%ld obst=%d annul=%d boucle_hz=%lu\n",
+      maintenant / 1000, nomEtat(etat),
+      derniereDistance[CANAL_AVANT], derniereDistance[CANAL_ARRIERE],
+      derniereDistance[CANAL_DROITE], derniereDistance[CANAL_GAUCHE],
+      cap, capCible,
+      comptes[0], comptes[1], comptes[2], comptes[3],
+      nbObstacles, nbReculsAnnules,
+      nbBoucles * 1000UL / ecart);
+  nbBoucles = 0;
 }
 
 // ================== PROGRAMME ==================
@@ -504,11 +555,15 @@ void setup() {
   horodatageDepart = millis();
   horodatageEtat = millis();
   dernierEchantillonGyro = micros();
+  dernierDebug = millis();
   etat = E_AVANCE;
   avancer(VITESSE_AVANCE);
 }
 
 void loop() {
+  nbBoucles++;
+  envoyerDebug();
+
   if (etat == E_FIN) {
     couleurLed(60, 0, 0);
     delay(500);
