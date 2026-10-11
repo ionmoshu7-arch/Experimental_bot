@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schema Rover</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --paper: #ffffff; --text: #1d2330; --muted: #6b7280;
+    --border: #d5d9e0; --fill: #f8fafc; --plan: #94a3b8;
+    --power: #dc2626; --gnd: #374151; --sig: #2563eb; --stby: #7c3aed;
+    --motor: #111827; --sda: #0891b2; --scl: #c026d3; --enc: #16a34a;
+    --bad: #dc2626; --ok: #16a34a;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --paper: #161b22; --text: #e6edf3; --muted: #8b949e;
+      --border: #3a414b; --fill: #1c222b; --plan: #6e7681;
+      --power: #f87171; --gnd: #9ca3af; --sig: #60a5fa; --stby: #a78bfa;
+      --motor: #e5e7eb; --sda: #22d3ee; --scl: #e879f9; --enc: #4ade80;
+      --bad: #f87171; --ok: #4ade80;
+      color-scheme: dark;
+    }
+  }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1760px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  .muted { color: var(--muted); }
+  button {
+    font: inherit; color: inherit; background: var(--paper); cursor: pointer;
+    border: 1px solid var(--border); border-radius: 8px; padding: 5px 12px; margin-left: auto;
+  }
+  .feuille {
+    background: var(--paper); border: 1px solid var(--border); border-radius: 12px;
+    overflow-x: auto; padding: 8px;
+  }
+  svg { display: block; min-width: 1200px; width: 100%; height: auto; }
+  svg text { fill: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .sources { margin-top: 12px; font-size: 13px; }
+  @media print {
+    body { background: #fff; } button { display: none; }
+    .feuille { border: none; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Schema du rover</h1>
+    <span class="muted">Tous les composants connus &middot; trait plein = installe, pointilles = prevu</span>
+    <button id="btnSvg">Enregistrer en SVG</button>
+  </header>
+  <div class="feuille"><svg id="schema" viewBox="0 0 1700 1260" role="img" aria-label="Schema de cablage du rover"></svg></div>
+  <p class="sources muted">
+    Sources : Rover_Cablage_Moteurs.pdf (01.09.26) et 01_Rover_Suivi.xlsx (feuilles Suivi, Connexions, Calibration).
+    Brochage moteurs tel que cable (PDF) ; les inversions faites en logiciel sont notees a part.
+  </p>
+</div>
+
+<script>
+(() => {
+  const svg = document.getElementById("schema");
+  const NS = "http://www.w3.org/2000/svg";
+  let out = "";
+
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+  // ---------- primitives ----------
+  function boite(x, y, w, h, titre, lignes = [], o = {}) {
+    const dash = o.prevu ? ' stroke-dasharray="6 4"' : "";
+    const trait = o.couleur || (o.prevu ? "var(--plan)" : "var(--text)");
+    out += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="var(--fill)" stroke="${trait}" stroke-width="${o.epais || 1.6}"${dash}/>`;
+    const ax = o.gauche ? x + 10 : x + w / 2, anc = o.gauche ? "start" : "middle";
+    let ty = y + (o.titreY || 20);
+    out += `<text x="${ax}" y="${ty}" text-anchor="${anc}" font-size="${o.taille || 13}" font-weight="700">${esc(titre)}</text>`;
+    for (const l of lignes) {
+      ty += 16;
+      const [t, c] = Array.isArray(l) ? l : [l, null];
+      out += `<text x="${ax}" y="${ty}" text-anchor="${anc}" font-size="11.5" ${c ? `style="fill:${c}"` : 'style="fill:var(--muted)"'}>${esc(t)}</text>`;
+    }
+  }
+  function fil(pts, couleur, o = {}) {
+    const d = pts.map((p, i) => (i ? "L" : "M") + p[0] + " " + p[1]).join(" ");
+    out += `<path d="${d}" fill="none" stroke="${couleur}" stroke-width="${o.epais || 1.6}" ${o.prevu ? 'stroke-dasharray="6 4"' : ""} stroke-linejoin="round"/>`;
+  }
+  function point(x, y, c) { out += `<circle cx="${x}" cy="${y}" r="3.2" fill="${c}"/>`; }
+  function texte(x, y, t, o = {}) {
+    out += `<text x="${x}" y="${y}" text-anchor="${o.anc || "start"}" font-size="${o.taille || 11.5}" ${o.gras ? 'font-weight="700"' : ""} ${o.c ? `style="fill:${o.c}"` : ""}>${esc(t)}</text>`;
+  }
+  function masse(x, y) {
+    out += `<path d="M${x} ${y} v8 M${x - 9} ${y + 8} h18 M${x - 6} ${y + 12} h12 M${x - 3} ${y + 16} h6" stroke="var(--gnd)" stroke-width="1.6" fill="none"/>`;
+  }
+  function diode(x, y) {   // horizontale, anode a gauche
+    out += `<path d="M${x} ${y - 7} L${x + 12} ${y} L${x} ${y + 7} Z" fill="var(--power)"/><path d="M${x + 12} ${y - 7} V${y + 7}" stroke="var(--power)" stroke-width="2"/>`;
+  }
+
+  // ================= ALIMENTATION =================
+  texte(20, 22, "ALIMENTATION", { gras: true, c: "var(--muted)" });
+  boite(30, 40, 160, 56, "Batterie 18 V", ["4 Ah · 72 Wh"], { couleur: "var(--power)" });
+  fil([[110, 96], [110, 130]], "var(--power)");
+  boite(30, 130, 160, 44, "Interrupteur general", [], { titreY: 26 });
+  fil([[190, 152], [205, 152], [205, 65], [220, 65]], "var(--power)");
+  fil([[205, 135], [220, 135]], "var(--power)");
+  fil([[205, 152], [205, 205], [220, 205]], "var(--power)");
+  point(205, 135, "var(--power)"); point(205, 152, "var(--power)");
+  boite(220, 40, 160, 50, "XL4005 → 3,3 V", [["capteurs, encodeurs, TB6612", "var(--power)"]], { taille: 12 });
+  boite(220, 110, 160, 50, "XL4005 → 5,6 V", [["logique ESP32, servos (prevu)", "var(--power)"]], { taille: 12 });
+  boite(220, 180, 160, 50, "XL4005 → 9 V", [["VM des 2 TB6612FNG", "var(--power)"]], { taille: 12 });
+  texte(30, 252, "Reglage des 3 bucks fait hors charge.", { c: "var(--muted)" });
+  texte(30, 268, "Masse commune unique pour tous les rails.", { c: "var(--muted)" });
+  masse(300, 236);
+
+  // 5,6 V -> diode -> 5V de l'ESP32
+  fil([[380, 135], [395, 135], [395, 160], [404, 160]], "var(--power)");
+  diode(404, 160);
+  fil([[416, 160], [430, 160]], "var(--power)");
+  texte(424, 175, "1N4007 → 4,9 V", { c: "var(--power)", anc: "end", taille: 10.5 });
+
+  // ================= NOTES =================
+  boite(20, 300, 380, 196, "Notes", [], { gauche: true });
+  [
+    ["Inversions faites en LOGICIEL :", "var(--text)"],
+    "  IN1/IN2 de M1 et M4 (moteurs a l'envers)",
+    "  phases A/B de M2 et M4 (positif = avance)",
+    ["GPIO48 = encodeur M3 B : LED RGB de la carte", "var(--text)"],
+    "  inutilisable (sur GPIO38 = SDA en v1.1)",
+    ["Plus aucun GPIO libre : extensions via I2C", "var(--text)"],
+    ["VL53L0X droite DEFAILLANT (renvoie 8191)", "var(--bad)"],
+    "  a remplacer par celui de reserve (Suivi n.54)",
+    "Encodeurs : 576 imp/tour · 0,365 mm/imp · roue 6,7 cm",
+    "Moteurs TT 1:48 · 9 V · 0,25 A nominal / 0,6 A bloque",
+  ].forEach((l, i) => {
+    const [t, c] = Array.isArray(l) ? l : [l, "var(--muted)"];
+    texte(32, 340 + i * 15.5, t, { c });
+  });
+
+  // ================= ESP32 =================
+  const EX = 430, EY = 110, EW = 230, EH = 700;
+  boite(EX, EY, EW, EH, "ESP32-S3", ["DevKitC-1"], { epais: 2.4, taille: 16, titreY: 330 });
+  // broches gauche
+  [[160, "5V"], [196, "GND"], [600, "GPIO42"], [650, "GPIO8"], [700, "GPIO9"]].forEach(([y, n]) => {
+    texte(EX + 8, y + 4, n, { taille: 11 });
+  });
+  fil([[EX, 196], [415, 196], [415, 206]], "var(--gnd)"); masse(415, 206);
+
+  // broches droite : moteurs
+  const D1 = [["GPIO2", "PWMA"], ["GPIO1", "AIN1"], ["GPIO4", "AIN2"], ["GPIO5", "PWMB"], ["GPIO6", "BIN1"], ["GPIO7", "BIN2"]];
+  const D2 = [["GPIO10", "PWMA"], ["GPIO11", "AIN1"], ["GPIO12", "AIN2"], ["GPIO13", "PWMB"], ["GPIO14", "BIN1"], ["GPIO15", "BIN2"]];
+  const DX = 790, DW = 200;
+  function pilote(y0, titre, broches, yStby) {
+    boite(DX, y0, DW, 200, titre, [], { couleur: "var(--motor)" });
+    texte(DX + DW / 2, y0 + 38, "VM 9 V (+ C 470–1000 µF)", { anc: "middle", c: "var(--power)" });
+    texte(DX + DW / 2, y0 + 53, "VCC 3,3 V · GND commune", { anc: "middle", c: "var(--power)" });
+    broches.forEach(([g, p], i) => {
+      const y = y0 + 64 + i * 21;
+      fil([[EX + EW, y], [DX, y]], "var(--sig)");
+      texte(EX + EW - 8, y + 4, g, { anc: "end", taille: 11 });
+      texte(DX + 8, y + 4, p, { taille: 11 });
+    });
+    texte(DX + 8, yStby + 4, "STBY", { taille: 11 });
+  }
+  pilote(110, "TB6612FNG #1 · cote droit", D1, 300);    // broches 174..279
+  pilote(370, "TB6612FNG #2 · cote gauche", D2, 560);   // broches 434..539
+  // STBY commun
+  fil([[EX + EW, 300], [DX, 300]], "var(--stby)");
+  fil([[740, 300], [740, 560], [DX, 560]], "var(--stby)");
+  point(740, 300, "var(--stby)");
+  texte(EX + EW - 8, 304, "GPIO16", { anc: "end", taille: 11 });
+  texte(700, 292, "STBY", { c: "var(--stby)", anc: "middle" });
+
+  // ================= MOTEURS =================
+  const MX = 1110, MW = 270;
+  function moteur(y, nom, a, b, sortie, yFil) {
+    boite(MX, y, MW, 92, nom, [
+      "Moteur TT 1:48 · connecteur PH2.0 6 broches",
+      [`Encodeur A → ${a} · B → ${b}`, "var(--enc)"],
+      ["VCC encodeur 3,3 V (JAMAIS 5 V)", "var(--power)"],
+    ], { couleur: "var(--motor)" });
+    fil([[DX + DW, yFil], [MX, yFil]], "var(--motor)", { epais: 2.6 });
+    texte((DX + DW + MX) / 2, yFil - 6, sortie, { anc: "middle", taille: 11 });
+  }
+  moteur(115, "M1 · avant-droit", "GPIO40", "GPIO41", "A01 / A02", 175);
+  moteur(225, "M3 · arriere-droit", "GPIO47", "GPIO48", "B01 / B02", 275);
+  moteur(375, "M2 · avant-gauche", "GPIO18", "GPIO19", "A01 / A02", 435);
+  moteur(485, "M4 · arriere-gauche", "GPIO21", "GPIO17", "B01 / B02", 535);
+
+  // encodeurs : etiquettes de reseau sur l'ESP32
+  const ENC = [["GPIO40", "M1 A"], ["GPIO41", "M1 B"], ["GPIO47", "M3 A"], ["GPIO48", "M3 B"],
+               ["GPIO18", "M2 A"], ["GPIO19", "M2 B"], ["GPIO21", "M4 A"], ["GPIO17", "M4 B"]];
+  texte(EX + EW + 14, 600, "ENCODEURS (cablage PDF)", { c: "var(--enc)", gras: true, taille: 11 });
+  ENC.forEach(([g, n], i) => {
+    const y = 618 + i * 22;
+    texte(EX + EW - 8, y + 4, g, { anc: "end", taille: 11 });
+    fil([[EX + EW, y], [EX + EW + 40, y]], "var(--enc)");
+    out += `<path d="M${EX + EW + 40} ${y - 8} h56 l8 8 l-8 8 h-56 Z" fill="none" stroke="var(--enc)" stroke-width="1.3"/>`;
+    texte(EX + EW + 46, y + 4, n, { taille: 11, c: "var(--enc)" });
+  });
+
+  // ================= LEGENDE =================
+  const LX = 1420, LY = 115;
+  boite(LX, LY, 260, 270, "Legende", [], { gauche: true });
+  [
+    ["var(--power)", "Alimentation", 0], ["var(--gnd)", "Masse", 0], ["var(--sig)", "Commande moteur", 0],
+    ["var(--stby)", "STBY (securite)", 0], ["var(--motor)", "Puissance moteur", 2.6], ["var(--enc)", "Encodeurs", 0],
+    ["var(--sda)", "I2C SDA", 0], ["var(--scl)", "I2C SCL", 0],
+  ].forEach(([c, t, ep], i) => {
+    const y = LY + 42 + i * 22;
+    fil([[LX + 14, y], [LX + 54, y]], c, { epais: ep || 2 });
+    texte(LX + 64, y + 4, t);
+  });
+  out += `<rect x="${LX + 14}" y="${LY + 222}" width="40" height="16" rx="3" fill="none" stroke="var(--plan)" stroke-dasharray="6 4"/>`;
+  texte(LX + 64, LY + 234, "Prevu, pas encore cable");
+  texte(LX + 64, LY + 254, "Defaillant", { c: "var(--bad)" });
+  out += `<rect x="${LX + 14}" y="${LY + 244}" width="40" height="14" rx="3" fill="none" stroke="var(--bad)" stroke-width="1.8"/>`;
+
+  // ================= PERIPHERIQUES GPIO (prevus) =================
+  texte(40, 568, "GPIO DIRECTS", { gras: true, c: "var(--muted)" });
+  [[600, "Buzzer piezo", "GPIO42 · tons simples uniquement"],
+   [650, "Microphone analogique", "GPIO8"],
+   [700, "Photoresistance + 10 kΩ", "GPIO9 · diviseur de tension"]].forEach(([y, t, s]) => {
+    boite(40, y - 20, 290, 40, t, [], { prevu: true, gauche: true, titreY: 16, taille: 12 });
+    texte(50, y + 14, s, { c: "var(--muted)", taille: 10.5 });
+    fil([[330, y], [EX, y]], "var(--sig)", { prevu: true });
+  });
+
+  // ================= BUS I2C =================
+  const SDA = 870, SCL = 888;
+  texte(20, 850, "BUS I2C · 100 kHz", { gras: true, c: "var(--muted)" });
+  fil([[500, EY + EH], [500, SDA]], "var(--sda)"); point(500, SDA, "var(--sda)");
+  fil([[580, EY + EH], [580, SCL]], "var(--scl)"); point(580, SCL, "var(--scl)");
+  texte(506, EY + EH - 8, "GPIO38 SDA", { taille: 11, c: "var(--sda)" });
+  texte(586, EY + EH + 18, "GPIO39 SCL", { taille: 11, c: "var(--scl)" });
+  fil([[40, SDA], [1665, SDA]], "var(--sda)", { epais: 2 });
+  fil([[40, SCL], [1665, SCL]], "var(--scl)", { epais: 2 });
+  texte(44, SDA - 6, "SDA", { c: "var(--sda)", gras: true });
+  texte(44, SCL + 16, "SCL", { c: "var(--scl)", gras: true });
+
+  function surBus(x, yHaut, ySda = SDA, yScl = SCL, prevu = false) {
+    fil([[x, ySda], [x, yHaut]], "var(--sda)", { prevu }); point(x, ySda, "var(--sda)");
+    fil([[x + 14, yScl], [x + 14, yHaut]], "var(--scl)", { prevu }); point(x + 14, yScl, "var(--scl)");
+  }
+
+  // MPU-6500
+  surBus(80, 930);
+  boite(40, 930, 210, 96, "MPU-6500 · 0x68", [
+    "Gyroscope + accelerometre", "±250 °/s · WHO_AM_I = 0x70", ["VCC 3,3 V · AD0 a la masse", "var(--power)"],
+  ]);
+
+  // TCA9548A
+  const TX = 290, TY = 930;
+  surBus(TX + 40, TY);
+  boite(TX, TY, 210, 300, "TCA9548A · 0x73", ["Multiplexeur I2C", "A0/A1 soudes sur VCC"]);
+  const CAN = [
+    ["VL53L1X avant", "portee 4 m", null, false],
+    ["VL53L0X arriere", "1,20 m", null, false],
+    ["VL53L0X droite", "DEFAILLANT · 8191", "var(--bad)", false],
+    ["VL53L0X gauche", "0,60 m (a surveiller)", null, false],
+    ["TCS34725 sol gauche", "couleur du sol", null, false],
+    ["TCS34725 sol centre", "couleur du sol", null, false],
+    ["TCS34725 sol droit", "couleur du sol", null, false],
+    ["libre", "+ 2e TCA9548A en reserve", null, true],
+  ];
+  CAN.forEach(([n, s, c, prevu], i) => {
+    const y = TY + 92 + i * 26;
+    texte(TX + 196, y + 4, "ch" + i, { anc: "end", taille: 11 });
+    fil([[TX + 210, y], [560, y]], "var(--sda)", { prevu });
+    const bx = 560, bw = 260;
+    out += `<rect x="${bx}" y="${y - 11}" width="${bw}" height="22" rx="5" fill="var(--fill)" stroke="${c || (prevu ? "var(--plan)" : "var(--text)")}" stroke-width="${c ? 1.8 : 1.3}" ${prevu ? 'stroke-dasharray="6 4"' : ""}/>`;
+    texte(bx + 8, y + 4, n + (i < 7 ? " · 0x29" : ""), { taille: 11.5, gras: true });
+    texte(bx + bw - 8, y + 4, s, { anc: "end", taille: 10.5, c: c || "var(--muted)" });
+  });
+  texte(TX, TY + 318, "Tous les capteurs derriere le mux : VCC 3,3 V", { c: "var(--power)" });
+
+  // peripheriques prevus, rangee 1 (sur le bus principal)
+  const R1 = [
+    [870, "OLED · 0x3C", ["Ecran"]],
+    [1070, "DHT20 · 0x38", ["Temperature / humidite"]],
+    [1270, "ADS1115 · 0x48", ["CAN 4 voies + breadboard"]],
+    [1470, "ESP32-S3-CAM · 0x50", ["Camera, esclave I2C"]],
+  ];
+  R1.forEach(([x, t, l]) => { surBus(x + 20, 930, SDA, SCL, true); boite(x, 930, 190, 64, t, l, { prevu: true }); });
+
+  // rangee 2 : sous-bus
+  const S2 = 1030, C2 = 1044;
+  fil([[850, SDA], [850, S2], [1460, S2]], "var(--sda)", { prevu: true }); point(850, SDA, "var(--sda)");
+  fil([[858, SCL], [858, C2], [1460, C2]], "var(--scl)", { prevu: true }); point(858, SCL, "var(--scl)");
+  const R2 = [
+    [870, "MCP23017 · 0x20", [
+      "GPA0 LED verte avant-gauche", "GPA1 LED verte avant-droite", "GPA2 LED rouge arriere-gauche",
+      "GPA3 LED rouge arriere-droite", "  (150 Ω chacune)", "GPA4–6 : 3 boutons"]],
+    [1070, "PCA9685 #1 · 0x40", [
+      "Servos, 50 Hz", "ch0 servo radar", "ch1 camera horizontal", "ch2 camera vertical",
+      ["V+ = rail 5,6 V + condensateur", "var(--power)"]]],
+    [1270, "PCA9685 #2 · 0x41", [
+      "LED RGB, ~1000 Hz", "ch0 rouge (150 Ω)", "ch1 verte (47 Ω)", "ch2 bleue (47 Ω)"]],
+  ];
+  R2.forEach(([x, t, l]) => { surBus(x + 20, 1070, S2, C2, true); boite(x, 1070, 190, 132, t, l, { prevu: true }); });
+
+  boite(1470, 1070, 190, 132, "Achats envisages", [
+    "Micro I2S INMP441", "  (commandes vocales)", "Ampli I2S MAX98357A", "  + haut-parleur", "VL53L1X pour l'arriere",
+  ], { prevu: true });
+
+  svg.innerHTML = out;
+
+  // ---------- export SVG ----------
+  document.getElementById("btnSvg").onclick = () => {
+    const s = getComputedStyle(document.documentElement);
+    let src = new XMLSerializer().serializeToString(svg);
+    // remplace les variables CSS par leurs valeurs pour un fichier autonome
+    src = src.replace(/var\(--([a-z]+)\)/g, (_, n) => s.getPropertyValue("--" + n).trim());
+    src = src.replace("<svg ", `<svg xmlns="${NS}" style="background:${s.getPropertyValue("--paper").trim()};font-family:Segoe UI,Arial,sans-serif" `);
+    src = src.replace(/<text /g, `<text fill="${s.getPropertyValue("--text").trim()}" `);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml" }));
+    a.download = "schema_rover.svg";
+    a.click();
+  };
+})();
+</script>
+</body>
+</html>
