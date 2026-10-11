@@ -122,26 +122,43 @@
   texte(424, 175, "1N4007 → 4,9 V", { c: "var(--power)", anc: "end", taille: 10.5 });
 
   // ================= NOTES =================
-  boite(20, 300, 380, 196, "Notes", [], { gauche: true });
+  boite(20, 300, 380, 245, "Notes", [], { gauche: true });
   [
     ["Inversions faites en LOGICIEL :", "var(--text)"],
     "  IN1/IN2 de M1 et M4 (moteurs a l'envers)",
     "  phases A/B de M2 et M4 (positif = avance)",
     ["GPIO48 = encodeur M3 B : LED RGB de la carte", "var(--text)"],
     "  inutilisable (sur GPIO38 = SDA en v1.1)",
-    ["Plus aucun GPIO libre : extensions via I2C", "var(--text)"],
+    ["GPIO non utilises (gris, ×) : avec precautions", "var(--text)"],
+    "  0, 3, 45, 46 = broches de demarrage (strapping)",
+    "  35–37 = prises par la PSRAM sur les modules R8",
+    "  20 = USB D+ (USB natif perdu : D− = GPIO19)",
+    "  43/44 = port serie du moniteur, a garder libre",
     ["VL53L0X droite DEFAILLANT (renvoie 8191)", "var(--bad)"],
     "  a remplacer par celui de reserve (Suivi n.54)",
     "Encodeurs : 576 imp/tour · 0,365 mm/imp · roue 6,7 cm",
     "Moteurs TT 1:48 · 9 V · 0,25 A nominal / 0,6 A bloque",
   ].forEach((l, i) => {
     const [t, c] = Array.isArray(l) ? l : [l, "var(--muted)"];
-    texte(32, 340 + i * 15.5, t, { c });
+    texte(32, 340 + i * 14, t, { c, taille: 11 });
   });
 
   // ================= ESP32 =================
   const EX = 430, EY = 110, EW = 230, EH = 700;
-  boite(EX, EY, EW, EH, "ESP32-S3", ["DevKitC-1"], { epais: 2.4, taille: 16, titreY: 330 });
+  boite(EX, EY, EW, EH, "ESP32-S3", ["DevKitC-1"], { epais: 2.4, taille: 16, titreY: 455 });
+  // GPIO non utilises : symbole "non connecte" (croix) + contrainte
+  [
+    ["GPIO0", "BOOT, strap"], ["GPIO3", "strap JTAG"], ["GPIO20", "USB D+"],
+    ["GPIO35", "PSRAM ?"], ["GPIO36", "PSRAM ?"], ["GPIO37", "PSRAM ?"],
+    ["GPIO45", "strap"], ["GPIO46", "strap"],
+    ["GPIO43", "TX0 serie"], ["GPIO44", "RX0 serie"],
+  ].forEach(([g, n], i) => {
+    const y = 250 + i * 28;
+    fil([[EX, y], [EX - 12, y]], "var(--plan)");
+    out += `<path d="M${EX - 17} ${y - 5} l10 10 M${EX - 17} ${y + 5} l10 -10" stroke="var(--plan)" stroke-width="1.6"/>`;
+    texte(EX + 8, y + 4, g, { taille: 11, c: "var(--plan)" });
+    texte(EX + 58, y + 4, n, { taille: 10, c: "var(--plan)" });
+  });
   // broches gauche
   [[160, "5V"], [196, "GND"], [600, "GPIO42"], [650, "GPIO8"], [700, "GPIO9"]].forEach(([y, n]) => {
     texte(EX + 8, y + 4, n, { taille: 11 });
@@ -203,7 +220,9 @@
 
   // ================= LEGENDE =================
   const LX = 1420, LY = 115;
-  boite(LX, LY, 260, 270, "Legende", [], { gauche: true });
+  boite(LX, LY, 260, 296, "Legende", [], { gauche: true });
+  out += `<path d="M${LX + 29} ${LY + 269} l10 10 M${LX + 29} ${LY + 279} l10 -10" stroke="var(--plan)" stroke-width="1.6"/>`;
+  texte(LX + 64, LY + 278, "GPIO non utilise", { c: "var(--plan)" });
   [
     ["var(--power)", "Alimentation", 0], ["var(--gnd)", "Masse", 0], ["var(--sig)", "Commande moteur", 0],
     ["var(--stby)", "STBY (securite)", 0], ["var(--motor)", "Puissance moteur", 2.6], ["var(--enc)", "Encodeurs", 0],
