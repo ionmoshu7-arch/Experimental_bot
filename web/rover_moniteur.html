@@ -125,6 +125,11 @@
   .vbar { height: 70px; width: 28px; margin: 0 auto 4px; background: var(--track); border-radius: 6px; position: relative; overflow: hidden; }
   .vbar > div { position: absolute; bottom: 0; left: 0; right: 0; height: 0; background: var(--text); transition: height 90ms linear; }
 
+  .alerte-collision {
+    background: var(--bad); color: #fff; font-weight: 700; text-align: center;
+    border-radius: 8px; padding: 8px; margin-bottom: 12px; letter-spacing: .05em;
+  }
+
   .mot-warn { color: var(--warn); font-size: 13px; margin: -4px 0 12px; }
   .mot-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 620px) { .mot-layout { grid-template-columns: 1fr; } }
@@ -258,6 +263,36 @@
       </div>
     </section>
 
+    <section class="panel c12">
+      <h2>Navigation autonome dans la piece</h2>
+      <div class="alerte-collision" id="navAlerte" hidden>COLLISION DETECTEE</div>
+      <div class="ligne-grid">
+        <div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+            <button class="primary cmdl" id="btnNav" disabled>Demarrer la navigation</button>
+            <span class="small muted">Poser le rover au sol, piece degagee.</span>
+          </div>
+          <div class="reglage" style="margin-top:12px"><label for="navV">Vitesse de croisiere</label><input type="range" id="navV" min="60" max="200" step="5" value="110"><b class="num" id="navVv">110</b></div>
+          <p class="small muted" style="margin:8px 0 0">
+            Lignes droites tenues au gyroscope, virages a l'angle exact. Devant un obstacle : ralentit,
+            s'arrete, recule s'il est tres pres, puis tourne vers le cote le plus degage.
+            Collision detectee par un choc (accelerometre) ou des roues bloquees : arret, recul, virage.
+            Arret : ce bouton, STOP ou Espace.
+          </p>
+        </div>
+        <div>
+          <div class="mot-tete"><span class="muted">Etat</span><b id="navEtat" style="font-size:22px">--</b></div>
+          <div class="evit" style="margin-top:10px">
+            <div class="stat"><span class="small muted">Cap actuel</span><b class="num" id="navCap">--</b></div>
+            <div class="stat"><span class="small muted">Cap vise</span><b class="num" id="navCible">--</b></div>
+            <div class="stat"><span class="small muted">Obstacles evites</span><b class="num" id="navObst">0</b></div>
+            <div class="stat"><span class="small muted">Collisions</span><b class="num" id="navCol">0</b></div>
+          </div>
+          <p class="small muted" style="margin:8px 0 0">Dernier evenement : <b id="navEv">--</b></p>
+        </div>
+      </div>
+    </section>
+
     <section class="panel c7">
       <h2>Moteurs</h2>
       <p class="mot-warn">Tester ROUES EN L'AIR. Les moteurs s'arretent seuls 0,4 s apres la derniere commande. Espace = STOP.</p>
@@ -289,6 +324,7 @@
         <svg class="compass" viewBox="-60 -60 120 120" aria-label="Cap">
           <circle r="56" fill="var(--track)" stroke="var(--border)"/>
           <g id="ticks"></g>
+          <line id="needleCible" x1="0" y1="0" x2="0" y2="-52" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" visibility="hidden"/>
           <g id="needle">
             <path d="M 0 -46 L 6 0 L 0 6 L -6 0 Z" fill="var(--bad)"/>
             <path d="M 0 46 L 6 0 L -6 0 Z" fill="var(--off)"/>
@@ -559,6 +595,7 @@
     const c = (j.col || []).map((k, i) => afficherCouleur(i, k));
     afficherImu(j.imu);
     afficherLigne(j.ligne);
+    afficherNav(j.nav, j.imu);
     const v = afficherMoteurs(j.mot);
     if (j.net) setTxt($("netInfo"), j.net.ok
       ? `WiFi ${j.net.ip} · ${j.net.rssi} dBm · ${j.net.clients} client(s)`
@@ -991,6 +1028,57 @@
   };
   $("btnCalib").onclick = () => envoyer("K\n");
 
+  // ---------- navigation autonome ----------
+  let etatNav = "ARRET", collisionsVues = null, minuteurAlerte = null, navTouche = 0;
+  const NOMS_NAV = { ARRET: "Arret", AVANCE: "Avance (cap tenu)", PAUSE: "Pause",
+                     RECULE: "Recule", TOURNE: "Virage au gyroscope" };
+
+  function afficherNav(n, imu) {
+    if (!n) return;
+    etatNav = n.e;
+    const actif = n.e !== "ARRET";
+    setTxt($("navEtat"), NOMS_NAV[n.e] || n.e);
+    const b = $("btnNav");
+    setTxt(b, actif ? "Arreter la navigation" : "Demarrer la navigation");
+    b.classList.toggle("stop", actif);
+    b.classList.toggle("primary", !actif);
+    setTxt($("navCap"), imu ? fmt(imu.cap) + " °" : "--");
+    setTxt($("navCible"), actif ? fmt(n.cible) + " °" : "--");
+    setTxt($("navObst"), String(n.obst));
+    setTxt($("navCol"), String(n.col));
+    setTxt($("navEv"), n.ev || "--");
+    const aiguille = $("needleCible");
+    aiguille.setAttribute("visibility", actif ? "visible" : "hidden");
+    aiguille.setAttribute("transform", `rotate(${-n.cible})`);
+    // nouvelle collision : alerte rouge 3 s
+    if (collisionsVues !== null && n.col > collisionsVues) {
+      $("navAlerte").hidden = false;
+      clearTimeout(minuteurAlerte);
+      minuteurAlerte = setTimeout(() => $("navAlerte").hidden = true, 3000);
+    }
+    collisionsVues = n.col;
+    if (performance.now() - navTouche > 1500 && $("navV").value != n.v) {
+      $("navV").value = n.v;
+      setTxt($("navVv"), String(n.v));
+    }
+  }
+
+  $("btnNav").onclick = () => {
+    if (etatNav !== "ARRET") {
+      envoyer("N 0\n");
+    } else {
+      pilotageGlobal = null; consignes.fill(0); majCurseurs(); dernierEnvoiNul = true;
+      envoyer("N 1\n");
+    }
+  };
+  let minuteurNavV = null;
+  $("navV").addEventListener("input", () => {
+    navTouche = performance.now();
+    setTxt($("navVv"), $("navV").value);
+    clearTimeout(minuteurNavV);
+    minuteurNavV = setTimeout(() => envoyer(`Q ${$("navV").value}\n`), 300);
+  });
+
   for (const [id, , dec] of REGLAGES) {
     $(id).addEventListener("input", () => {
       reglageTouche = performance.now();
@@ -1047,6 +1135,8 @@
         ],
         imu: { cap: capD, gx: .1, gy: -.2, gz, ax: .01, ay: -.02, az: 1, temp: 31.4, biais: -.018 },
         mot: { stby: eff.some(v => v) ? 1 : 0, m },
+        nav: { e: "AVANCE", cible: capD + 10, obst: Math.floor(s / 4), col: Math.floor(s / 9),
+               v: 110, ev: "obstacle" },
         ligne: (() => {
           const pos = Math.sin(s / 2) * 0.8;
           return { e: "SUIT", pos, cal: 1, kp: 80, kd: 4, v: 90,

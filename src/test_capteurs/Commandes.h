@@ -9,10 +9,12 @@
  *   L 1 / L 0 + Entree : demarrer / arreter le suivi de ligne
  *   K + Entree : calibration du suivi de ligne (4 s)
  *   P kp kd vitesse + Entree : reglages du suivi de ligne
+ *   N 1 / N 0 + Entree : demarrer / arreter la navigation autonome
+ *   Q vitesse + Entree : vitesse de croisiere de la navigation
  *
  * Securite : sans commande moteur depuis 400 ms, tout s'arrete
- * (sauf pendant le suivi de ligne, qui a ses propres arrets).
- * Une commande moteur manuelle ou "s" arrete le suivi de ligne.
+ * (sauf en mode autonome, qui a ses propres arrets).
+ * Une commande moteur manuelle ou "s" arrete les modes autonomes.
  * La deconnexion d'un client WiFi arrete tout.
  */
 #pragma once

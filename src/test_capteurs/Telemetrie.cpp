@@ -6,6 +6,7 @@
 #include "Distance.h"
 #include "Gyro.h"
 #include "Moteurs.h"
+#include "Navigation.h"
 #include "Reseau.h"
 #include "SuiviLigne.h"
 
@@ -58,8 +59,12 @@ static void afficherTexte() {
                 suiviLigneNomEtat(), l.calibre ? "calibre" : "NON CALIBRE",
                 l.position, l.noirceur[0], l.noirceur[1], l.noirceur[2]);
 
+  const InfoNav &nv = navigationInfo();
+  Serial.printf("NAV       %-11s cap cible %.1f  obstacles %d  collisions %d\n",
+                navigationNomEtat(), nv.capCible, nv.obstacles, nv.collisions);
+
   if (reseauConnecte())
-    Serial.printf("WIFI     http://%s.local/  %s  %d dBm  %d client(s)\n",
+    Serial.printf("WIFI    http://%s.local/  %s  %d dBm  %d client(s)\n",
                   NOM_HOTE, reseauIp().c_str(), reseauRssi(), reseauNbClients());
   else
     Serial.println("WIFI      non connecte");
@@ -134,6 +139,10 @@ static void envoyerJson() {
           "\"cal\":%d,\"kp\":%.1f,\"kd\":%.2f,\"v\":%d}",
           suiviLigneNomEtat(), l.position, l.noirceur[0], l.noirceur[1], l.noirceur[2],
           l.calibre, l.kp, l.kd, l.vitesse);
+
+  const InfoNav &nv = navigationInfo();
+  ajouter(",\"nav\":{\"e\":\"%s\",\"cible\":%.1f,\"obst\":%d,\"col\":%d,\"v\":%d,\"ev\":\"%s\"}",
+          navigationNomEtat(), nv.capCible, nv.obstacles, nv.collisions, nv.vitesse, nv.evenement);
 
   ajouter(",\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d}}",
           reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauNbClients());

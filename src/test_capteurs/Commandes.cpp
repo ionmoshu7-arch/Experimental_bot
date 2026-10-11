@@ -2,6 +2,7 @@
 
 #include "Gyro.h"
 #include "Moteurs.h"
+#include "Navigation.h"
 #include "SuiviLigne.h"
 #include "Telemetrie.h"
 
@@ -23,7 +24,12 @@ void arreterMoteurs() {
 
 void arretGeneral() {
   suiviLigneArreter("[LIGNE] arret");
+  navigationArreter("[NAV] arret");
   arreterMoteurs();
+}
+
+static bool modeAutonome() {
+  return suiviLigneOccupe() || navigationActive();
 }
 
 static void executerLigne(Lecteur &l) {
@@ -34,14 +40,20 @@ static void executerLigne(Lecteur &l) {
   float kp, kd;
 
   if (cmd == 'A' && sscanf(args, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]) == 4) {
-    // une commande manuelle reprend la main sur le suivi de ligne
+    // une commande manuelle reprend la main sur les modes autonomes
     if (suiviLigneOccupe()) suiviLigneArreter("[LIGNE] arret : commande manuelle");
+    if (navigationActive()) navigationArreter("[NAV] arret : commande manuelle");
     derniereCommandeMoteurs = millis();
     for (int i = 0; i < 4; i++) moteurAppliquer(i, v[i]);
     moteursActiver(moteursActifs());
   } else if (cmd == 'L' && sscanf(args, "%d", &v[0]) == 1) {
-    if (v[0]) suiviLigneDemarrer();
+    if (v[0]) { navigationArreter("[NAV] arret : suivi de ligne"); suiviLigneDemarrer(); }
     else suiviLigneArreter("[LIGNE] arret demande");
+  } else if (cmd == 'N' && sscanf(args, "%d", &v[0]) == 1) {
+    if (v[0]) { suiviLigneArreter("[LIGNE] arret : navigation"); navigationDemarrer(); }
+    else navigationArreter("[NAV] arret demande");
+  } else if (cmd == 'Q' && sscanf(args, "%d", &v[0]) == 1) {
+    navigationVitesse(v[0]);
   } else if (cmd == 'K' && l.lg == 1) {
     suiviLigneCalibrer();
   } else if (cmd == 'P' && sscanf(args, "%f %f %d", &kp, &kd, &v[0]) == 3) {
@@ -80,7 +92,7 @@ void commandesTraiterWifi(const char* texte, size_t n) {
 }
 
 void commandesSurveiller() {
-  if (suiviLigneOccupe()) return;   // le suivi de ligne pilote les moteurs
+  if (modeAutonome()) return;   // suivi de ligne ou navigation pilotent les moteurs
   if (moteursActifs() &&
       millis() - derniereCommandeMoteurs > DELAI_SECURITE_MOTEURS_MS) {
     arreterMoteurs();

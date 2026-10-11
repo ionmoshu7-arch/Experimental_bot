@@ -22,6 +22,8 @@
  *   Telemetrie.cpp  bloc texte + trames [DATA] JSON
  *   Commandes.cpp   commandes (c, z, s, A, L, K, P) et securite moteurs
  *   SuiviLigne.cpp  suivi de ligne noire (3 capteurs de couleur, PD)
+ *   Navigation.cpp  navigation autonome : cap au gyroscope, obstacles,
+ *                   detection de collision
  *   Reseau.cpp      WiFi, page web, WebSocket, mises a jour OTA
  *   lib/Rover/      materiel commun (moteurs, capteurs, gyro, bus)
  * ------------------------------------------------------------
@@ -36,6 +38,7 @@
 #include "Moteurs.h"
 
 #include "Commandes.h"
+#include "Navigation.h"
 #include "Reseau.h"
 #include "SuiviLigne.h"
 #include "Telemetrie.h"
@@ -107,8 +110,9 @@ void loop() {
   gyroMettreAJour();
   distanceMettreAJour();
   couleurMettreAJour();
-  suiviLigneMettreAJour();
   moteursCalculerVitesses();
+  suiviLigneMettreAJour();
+  navigationMettreAJour();
   commandesSurveiller();
 
   telemetrieMettreAJour();
