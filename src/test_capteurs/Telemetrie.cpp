@@ -6,6 +6,7 @@
 #include "Distance.h"
 #include "Gyro.h"
 #include "Moteurs.h"
+#include "Reseau.h"
 
 static unsigned long dernierTexte = 0, dernierJson = 0;
 static unsigned long nbBoucles = 0, dernierCalculHz = 0;
@@ -50,49 +51,83 @@ static void afficherTexte() {
                   m.nom, m.consigne, m.vitesse, moteurCompte(i));
   }
   Serial.println();
+
+  if (reseauConnecte())
+    Serial.printf("WIFI      http://%s.local/  %s  %d dBm  %d client(s)\n",
+                  NOM_HOTE, reseauIp().c_str(), reseauRssi(), reseauNbClients());
+  else
+    Serial.println("WIFI      non connecte");
+}
+
+// La trame est construite une fois puis envoyee au port serie et au WiFi
+static char trame[2048];
+static size_t lgTrame = 0;
+
+static void ajouter(const char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  int n = vsnprintf(trame + lgTrame, sizeof(trame) - lgTrame, format, args);
+  va_end(args);
+  if (n > 0) lgTrame = min(lgTrame + n, sizeof(trame) - 1);
+}
+
+void journal(const char* format, ...) {
+  char ligne[160];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(ligne, sizeof(ligne), format, args);
+  va_end(args);
+  Serial.println(ligne);
+  reseauDiffuser(ligne, strlen(ligne));
 }
 
 static void envoyerJson() {
-  Serial.printf("[DATA]{\"t\":%lu,\"hz\":%lu,\"tof\":[", millis(), boucleHz);
+  lgTrame = 0;
+  ajouter("[DATA]{\"t\":%lu,\"hz\":%lu,\"tof\":[", millis(), boucleHz);
   for (uint8_t i = 0; i < 4; i++) {
     const CapteurToF &t = tof[i];
-    Serial.printf("%s{\"n\":\"%s\",\"m\":\"%s\",\"d\":%d,\"s\":\"%s\",\"p\":%d",
-                  i ? "," : "", t.nom, t.modele, t.brut, distanceCode(i), t.porteeMm);
+    ajouter("%s{\"n\":\"%s\",\"m\":\"%s\",\"d\":%d,\"s\":\"%s\",\"p\":%d",
+            i ? "," : "", t.nom, t.modele, t.brut, distanceCode(i), t.porteeMm);
     if (i == CANAL_AVANT && t.present)
-      Serial.printf(",\"st\":\"%s\"", distanceStatutAvant());
-    Serial.print("}");
+      ajouter(",\"st\":\"%s\"", distanceStatutAvant());
+    ajouter("}");
   }
 
-  Serial.print("],\"col\":[");
+  ajouter("],\"col\":[");
   for (int i = 0; i < 3; i++) {
     const CapteurCouleur &k = couleurs[i];
-    Serial.printf("%s{\"n\":\"%s\",\"ok\":%d", i ? "," : "", k.nom,
-                  k.present ? (k.valide ? 1 : 0) : -1);
+    ajouter("%s{\"n\":\"%s\",\"ok\":%d", i ? "," : "", k.nom,
+            k.present ? (k.valide ? 1 : 0) : -1);
     if (k.valide)
-      Serial.printf(",\"r\":%u,\"g\":%u,\"b\":%u,\"c\":%u,\"lum\":%.3f,"
-                    "\"lux\":%.0f,\"k\":%d,\"sat\":%d,\"nom\":\"%s\"",
-                    k.r, k.g, k.b, k.c, k.lum, k.lux, k.cct, k.sature, k.couleur);
-    Serial.print("}");
+      ajouter(",\"r\":%u,\"g\":%u,\"b\":%u,\"c\":%u,\"lum\":%.3f,"
+              "\"lux\":%.0f,\"k\":%d,\"sat\":%d,\"nom\":\"%s\"",
+              k.r, k.g, k.b, k.c, k.lum, k.lux, k.cct, k.sature, k.couleur);
+    ajouter("}");
   }
 
-  Serial.print("],\"imu\":");
+  ajouter("],\"imu\":");
   if (gyroPresent()) {
     const GyroData &g = gyroBrut();
     const AccelData &a = gyroAccel();
-    Serial.printf("{\"cap\":%.2f,\"gx\":%.2f,\"gy\":%.2f,\"gz\":%.2f,"
-                  "\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,\"temp\":%.1f,\"biais\":%.4f}",
-                  gyroCap(), g.gyroX, g.gyroY, gyroVitesseZ(),
-                  a.accelX, a.accelY, a.accelZ, gyroTemperature(), gyroBiaisZ());
+    ajouter("{\"cap\":%.2f,\"gx\":%.2f,\"gy\":%.2f,\"gz\":%.2f,"
+            "\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,\"temp\":%.1f,\"biais\":%.4f}",
+            gyroCap(), g.gyroX, g.gyroY, gyroVitesseZ(),
+            a.accelX, a.accelY, a.accelZ, gyroTemperature(), gyroBiaisZ());
   } else {
-    Serial.print("null");
+    ajouter("null");
   }
 
-  Serial.printf(",\"mot\":{\"stby\":%d,\"m\":[", moteursActive());
+  ajouter(",\"mot\":{\"stby\":%d,\"m\":[", moteursActive());
   for (int i = 0; i < 4; i++) {
-    Serial.printf("%s{\"cmd\":%d,\"v\":%.0f,\"enc\":%ld}", i ? "," : "",
-                  moteurs[i].consigne, moteurs[i].vitesse, moteurCompte(i));
+    ajouter("%s{\"cmd\":%d,\"v\":%.0f,\"enc\":%ld}", i ? "," : "",
+            moteurs[i].consigne, moteurs[i].vitesse, moteurCompte(i));
   }
-  Serial.println("]}}");
+
+  ajouter("]},\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d}}",
+          reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauNbClients());
+
+  Serial.println(trame);
+  reseauDiffuser(trame, lgTrame);
 }
 
 void telemetrieDemarrer() {

@@ -3,3 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Identifiants WiFi et OTA : jamais sur GitHub
+include/secrets.h
+secrets.ini

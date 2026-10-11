@@ -11,12 +11,17 @@
  * LES MOTEURS NE TOURNENT QUE SUR COMMANDE, et s'arretent seuls si
  * aucune commande n'arrive pendant 400 ms. Tester ROUES EN L'AIR.
  *
- * Port serie a 921600 bauds. Page de suivi : web/rover_moniteur.html
+ * PILOTAGE ET SUIVI :
+ *   - par USB : port serie a 921600 bauds
+ *   - par WiFi : http://rover.local/ (page servie par le rover)
+ * La page est web/rover_moniteur.html, embarquee dans le firmware.
+ * Identifiants WiFi : include/secrets.h (non versionne).
  *
  * Fichiers :
  *   main.cpp        demarrage et boucle
  *   Telemetrie.cpp  bloc texte + trames [DATA] JSON
- *   Commandes.cpp   commandes serie (c, z, s, A ...) et securite moteurs
+ *   Commandes.cpp   commandes (c, z, s, A ...) et securite moteurs
+ *   Reseau.cpp      WiFi, page web, WebSocket, mises a jour OTA
  *   lib/Rover/      materiel commun (moteurs, capteurs, gyro, bus)
  * ------------------------------------------------------------
  */
@@ -30,7 +35,17 @@
 #include "Moteurs.h"
 
 #include "Commandes.h"
+#include "Reseau.h"
 #include "Telemetrie.h"
+
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#error "Copier include/secrets.example.h en include/secrets.h et y mettre le WiFi"
+#endif
+
+// web/rover_moniteur.html, embarque par board_build.embed_txtfiles
+extern const char PAGE_CONTROLE[] asm("_binary_web_rover_moniteur_html_start");
 
 // 921600 bauds : une trame JSON part en ~10 ms au lieu de ~80 ms.
 // Le moniteur de VS Code et la page web doivent utiliser la meme vitesse.
@@ -68,12 +83,18 @@ void setup() {
   } else {
     Serial.println("  MPU-6500 0x68          ABSENT");
   }
+  // --- WiFi : pilotage et suivi depuis la page web ---
+  reseauSurMessage(commandesTraiterWifi);
+  reseauSurDeconnexion(arreterMoteurs);   // page fermee ou reseau coupe
+  reseauSurOta(arreterMoteurs);           // rien ne tourne pendant une mise a jour
+  reseauDemarrer(WIFI_SSID, WIFI_MOT_DE_PASSE, OTA_MOT_DE_PASSE, PAGE_CONTROLE);
   Serial.println("================================================");
 
   telemetrieDemarrer();
 }
 
 void loop() {
+  reseauMettreAJour();
   commandesLire();
 
   // Aucune lecture n'attend : chaque capteur n'est lu que s'il a une

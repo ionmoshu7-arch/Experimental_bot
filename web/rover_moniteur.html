@@ -22,6 +22,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -48,6 +49,8 @@
     background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 700;
   }
   .statut { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  .groupe { display: flex; align-items: center; gap: 6px; }
+  .groupe input { padding: 6px 8px; }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--off); }
   .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
   .grid { display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
@@ -149,17 +152,25 @@
     <h1>Rover Moniteur</h1>
     <div class="statut"><span class="dot" id="dot"></span><span id="etatCnx">Deconnecte</span></div>
     <span class="small muted num" id="rate"></span>
-    <select id="baud" title="Vitesse (bauds) : 921600 pour test_capteurs, 115200 pour evitement">
-      <option value="921600">921600 (test capteurs)</option>
-      <option value="115200">115200 (evitement)</option>
-    </select>
-    <button class="primary" id="btnCnx">Connecter</button>
-    <button id="btnReset" disabled title="Impulsion sur RTS : redemarre l'ESP32">Redemarrer la carte</button>
+    <span class="small muted num" id="netInfo"></span>
+    <span class="groupe" id="grpUsb">
+      <select id="baud" title="Vitesse (bauds) : 921600 pour test_capteurs, 115200 pour evitement">
+        <option value="921600">921600 (test capteurs)</option>
+        <option value="115200">115200 (evitement)</option>
+      </select>
+      <button class="primary" id="btnCnx" title="Connexion par le cable USB">USB</button>
+    </span>
+    <span class="groupe">
+      <input id="adrWifi" value="rover.local" size="13" title="Adresse du rover sur le WiFi (rover.local ou son IP)" aria-label="Adresse WiFi du rover">
+      <button class="primary" id="btnWifi" title="Connexion par le WiFi">WiFi</button>
+    </span>
+    <button id="btnReset" disabled title="Impulsion sur RTS : redemarre l'ESP32 (USB seulement)">Redemarrer la carte</button>
     <button id="btnDemo">Demo</button>
   </header>
 
   <div class="alerte" id="noSerial" hidden>
-    Ce navigateur ne gere pas Web Serial. Ouvrir cette page dans <b>Chrome</b> ou <b>Edge</b> (ordinateur).
+    Ce navigateur ne gere pas Web Serial (USB) : utiliser <b>Chrome</b> ou <b>Edge</b> sur ordinateur,
+    ou se connecter par <b>WiFi</b>.
   </div>
 
   <div class="grid">
@@ -304,6 +315,12 @@
 
   // ---------- etat ----------
   let port = null, reader = null, writer = null, lecture = false;
+  let ws = null, wsAuto = false;   // connexion WiFi (WebSocket)
+  const wsOuvert = () => !!(ws && ws.readyState === WebSocket.OPEN);
+  const connecte = () => !!port || wsOuvert();
+  // Page servie par le rover lui-meme (http://rover.local/) : WiFi automatique
+  const servieParRover = location.protocol === "http:" &&
+    !["localhost", "127.0.0.1", ""].includes(location.hostname);
   let demoTimer = null;
   let nbData = 0;
   const hist = [];          // {t, d:[4], cap, gz, v:[4], c:[3]}
@@ -487,6 +504,9 @@
     const c = (j.col || []).map((k, i) => afficherCouleur(i, k));
     afficherImu(j.imu);
     const v = afficherMoteurs(j.mot);
+    if (j.net) setTxt($("netInfo"), j.net.ok
+      ? `WiFi ${j.net.ip} · ${j.net.rssi} dBm · ${j.net.clients} client(s)`
+      : "WiFi du rover : non connecte");
     ajouterHistorique({ d, c, v: v || [null, null, null, null],
                         cap: j.imu ? j.imu.cap : null, gz: j.imu ? j.imu.gz : null });
   }
@@ -621,7 +641,7 @@
   requestAnimationFrame(boucleAffichage);
 
   setInterval(() => {
-    setTxt($("rate"), (port || demoTimer) ? `${nbData} trames/s` : "");
+    setTxt($("rate"), (connecte() || demoTimer) ? `${nbData} trames/s` : "");
     nbData = 0;
   }, 1000);
 
@@ -661,7 +681,7 @@
   // Envoi toutes les 100 ms tant qu'un moteur tourne (le rover s'arrete
   // seul s'il ne recoit plus rien pendant 400 ms).
   setInterval(() => {
-    if (!writer) return;
+    if (!connecte()) return;
     const eff = consignesEffectives();
     const nul = eff.every(v => v === 0);
     if (nul && dernierEnvoiNul) return;
@@ -713,18 +733,59 @@
   // page cachee ou fenetre quittee : on arrete tout
   document.addEventListener("visibilitychange", () => { if (document.hidden) toutArreter(); });
   window.addEventListener("blur", () => { if (pilotageGlobal) { pilotageGlobal = null; majCurseurs(); } });
-  window.addEventListener("beforeunload", () => { if (writer) envoyer("s"); });
+  window.addEventListener("beforeunload", () => { if (connecte()) envoyer("s"); });
 
-  // ---------- Web Serial ----------
+  // ---------- connexion (USB ou WiFi) ----------
   function etatConnexion(on, texte) {
     $("dot").classList.toggle("on", on);
     setTxt($("etatCnx"), texte);
-    setTxt($("btnCnx"), on ? "Deconnecter" : "Connecter");
-    $("btnReset").disabled = !(on && port);
-    $("sendInput").disabled = $("sendBtn").disabled = !(on && port);
-    document.querySelectorAll(".cmd").forEach(b => b.disabled = !(on && port));
-    $("baud").disabled = on;
+    setTxt($("btnCnx"), port ? "Deconnecter USB" : "USB");
+    setTxt($("btnWifi"), ws ? "Deconnecter WiFi" : "WiFi");
+    $("btnCnx").disabled = !("serial" in navigator) || !!ws;
+    $("btnWifi").disabled = !!port;
+    $("btnReset").disabled = !port;
+    const actif = on && connecte();
+    $("sendInput").disabled = $("sendBtn").disabled = !actif;
+    document.querySelectorAll(".cmd").forEach(b => b.disabled = !actif);
+    $("baud").disabled = !!port;
+    $("adrWifi").disabled = !!ws;
   }
+
+  function connecterWifi(adresse) {
+    const url = `ws://${adresse}:81/`;
+    const s = new WebSocket(url);
+    ws = s;
+    etatConnexion(false, `WiFi : connexion a ${adresse}...`);
+    s.onopen = () => {
+      etatConnexion(true, `Connecte en WiFi (${adresse})`);
+      log(`--- connecte en WiFi a ${adresse} ---`);
+    };
+    // un message = une ligne [DATA] ou un message du journal
+    s.onmessage = (e) => String(e.data).split("\n").forEach(traiterLigne);
+    s.onerror = () => log(`! WiFi : ${adresse} ne repond pas (meme reseau ? rover allume ?)`);
+    s.onclose = () => {
+      if (ws !== s) return;
+      ws = null;
+      pilotageGlobal = null; consignes.fill(0); majCurseurs();
+      etatConnexion(false, "Deconnecte");
+      log("--- WiFi deconnecte ---");
+      if (wsAuto) setTimeout(() => { if (!ws && !port && wsAuto) connecterWifi(adresse); }, 2000);
+    };
+  }
+
+  function deconnecterWifi() {
+    wsAuto = false;
+    if (!ws) return;
+    try { if (wsOuvert()) ws.send("s"); } catch (e) {}
+    ws.close();
+  }
+
+  $("btnWifi").onclick = () => {
+    if (demoTimer) arreterDemo();
+    if (ws) return deconnecterWifi();
+    wsAuto = true;
+    connecterWifi($("adrWifi").value.trim() || "rover.local");
+  };
 
   async function connecter() {
     port = await navigator.serial.requestPort();
@@ -780,17 +841,30 @@
 
   let fileEnvoi = Promise.resolve();
   function envoyer(texte, silencieux) {
-    if (!writer) return;
-    const w = writer;
-    fileEnvoi = fileEnvoi.then(() => w.write(new TextEncoder().encode(texte))).catch(() => {});
+    if (wsOuvert()) {
+      ws.send(texte);
+    } else if (writer) {
+      const w = writer;
+      fileEnvoi = fileEnvoi.then(() => w.write(new TextEncoder().encode(texte))).catch(() => {});
+    } else {
+      return;
+    }
     if (!silencieux) log("> " + texte.trim());
   }
 
   if (!("serial" in navigator)) {
-    $("noSerial").hidden = false;
-    $("btnCnx").disabled = true;
+    // Web Serial absent (autre navigateur, ou page servie en http par le rover)
+    if (servieParRover) $("grpUsb").hidden = true;
+    else $("noSerial").hidden = false;
   } else {
     navigator.serial.addEventListener("disconnect", (e) => { if (port && e.target === port) deconnecter(); });
+  }
+  etatConnexion(false, "Deconnecte");
+
+  if (servieParRover) {
+    $("adrWifi").value = location.hostname;
+    wsAuto = true;
+    connecterWifi(location.hostname);
   }
 
   $("btnCnx").onclick = async () => {
@@ -828,7 +902,7 @@
   }
   $("btnDemo").onclick = () => {
     if (demoTimer) return arreterDemo();
-    if (port) return;
+    if (connecte()) return;
     let t = 0, capD = 0;
     const enc = [0, 0, 0, 0], vit = [0, 0, 0, 0];
     setTxt($("btnDemo"), "Arreter la demo");

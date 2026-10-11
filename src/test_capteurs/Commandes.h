@@ -1,5 +1,5 @@
 /*
- * Commandes.h - commandes recues sur le port serie
+ * Commandes.h - commandes recues par USB (port serie) ou par WiFi
  * ------------------------------------------------------------
  *   c : recalibrer le gyroscope (ne pas bouger le rover)
  *   z : remettre le cap a zero
@@ -8,11 +8,15 @@
  *       de -255 a 255, positif = vers l'avant (a repeter < 400 ms)
  *
  * Securite : sans commande moteur depuis 400 ms, tout s'arrete.
+ * La deconnexion d'un client WiFi arrete aussi les moteurs.
  */
 #pragma once
 
+#include <Arduino.h>
+
 const unsigned long DELAI_SECURITE_MOTEURS_MS = 400;
 
-void commandesLire();         // a appeler a chaque tour de boucle
+void commandesLire();                                    // port serie
+void commandesTraiterWifi(const char* texte, size_t n);  // message WebSocket
 void commandesSurveiller();   // arret de securite des moteurs
 void arreterMoteurs();        // consignes a 0 et STBY a LOW
