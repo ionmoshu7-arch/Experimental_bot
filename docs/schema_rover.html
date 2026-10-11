@@ -134,8 +134,8 @@
     "  35–37 = prises par la PSRAM sur les modules R8",
     "  20 = USB D+ (USB natif perdu : D− = GPIO19)",
     "  43/44 = port serie du moniteur, a garder libre",
-    ["VL53L0X droite DEFAILLANT (renvoie 8191)", "var(--bad)"],
-    "  a remplacer par celui de reserve (Suivi n.54)",
+    ["VL53L0X droite : portee 25 cm seulement", "var(--text)"],
+    "  au-dela : 8190/8191 = rien a moins de 25 cm",
     "Encodeurs : 576 imp/tour · 0,365 mm/imp · roue 6,7 cm",
     "Moteurs TT 1:48 · 9 V · 0,25 A nominal / 0,6 A bloque",
   ].forEach((l, i) => {
@@ -277,11 +277,11 @@
   const CAN = [
     ["VL53L1X avant", "portee 4 m", null, false],
     ["VL53L0X arriere", "1,20 m", null, false],
-    ["VL53L0X droite", "DEFAILLANT · 8191", "var(--bad)", false],
+    ["VL53L0X droite", "0,25 m seulement", null, false],
     ["VL53L0X gauche", "0,60 m (a surveiller)", null, false],
-    ["TCS34725 sol gauche", "couleur du sol", null, false],
-    ["TCS34725 sol centre", "couleur du sol", null, false],
-    ["TCS34725 sol droit", "couleur du sol", null, false],
+    ["TCS34725 sol gauche", "suivi de ligne", null, false],
+    ["TCS34725 sol centre", "suivi de ligne", null, false],
+    ["TCS34725 sol droit", "suivi de ligne", null, false],
     ["libre", "+ 2e TCA9548A en reserve", null, true],
   ];
   CAN.forEach(([n, s, c, prevu], i) => {

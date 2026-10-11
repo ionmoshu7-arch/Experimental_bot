@@ -7,6 +7,7 @@
 #include "Gyro.h"
 #include "Moteurs.h"
 #include "Reseau.h"
+#include "SuiviLigne.h"
 
 static unsigned long dernierTexte = 0, dernierJson = 0;
 static unsigned long nbBoucles = 0, dernierCalculHz = 0;
@@ -52,8 +53,13 @@ static void afficherTexte() {
   }
   Serial.println();
 
+  const InfoLigne &l = suiviLigneInfo();
+  Serial.printf("LIGNE     %-11s %s  position %+.2f  noirceur G=%.2f C=%.2f D=%.2f\n",
+                suiviLigneNomEtat(), l.calibre ? "calibre" : "NON CALIBRE",
+                l.position, l.noirceur[0], l.noirceur[1], l.noirceur[2]);
+
   if (reseauConnecte())
-    Serial.printf("WIFI      http://%s.local/  %s  %d dBm  %d client(s)\n",
+    Serial.printf("WIFI     http://%s.local/  %s  %d dBm  %d client(s)\n",
                   NOM_HOTE, reseauIp().c_str(), reseauRssi(), reseauNbClients());
   else
     Serial.println("WIFI      non connecte");
@@ -123,7 +129,13 @@ static void envoyerJson() {
             moteurs[i].consigne, moteurs[i].vitesse, moteurCompte(i));
   }
 
-  ajouter("]},\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d}}",
+  const InfoLigne &l = suiviLigneInfo();
+  ajouter("]},\"ligne\":{\"e\":\"%s\",\"pos\":%.2f,\"d\":[%.2f,%.2f,%.2f],"
+          "\"cal\":%d,\"kp\":%.1f,\"kd\":%.2f,\"v\":%d}",
+          suiviLigneNomEtat(), l.position, l.noirceur[0], l.noirceur[1], l.noirceur[2],
+          l.calibre, l.kp, l.kd, l.vitesse);
+
+  ajouter(",\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d}}",
           reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauNbClients());
 
   Serial.println(trame);

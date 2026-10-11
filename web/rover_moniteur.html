@@ -107,6 +107,24 @@
   .big { font-size: 28px; font-weight: 700; }
 
   /* moteurs */
+  /* suivi de ligne */
+  .ligne-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 820px) { .ligne-grid { grid-template-columns: 1fr; } }
+  .reglage { display: grid; grid-template-columns: 150px 1fr 44px; gap: 10px; align-items: center; margin: 4px 0; }
+  .reglage input { padding: 0; accent-color: var(--accent); }
+  .reglage b { text-align: right; }
+  .posbar { position: relative; height: 26px; background: var(--track); border-radius: 13px; margin: 12px 0 4px; }
+  .poscentre { position: absolute; left: 50%; top: 4px; bottom: 4px; width: 2px; background: var(--border); }
+  .posmark {
+    position: absolute; top: 3px; width: 20px; height: 20px; margin-left: -10px; left: 50%;
+    border-radius: 50%; background: var(--text); transition: left 90ms linear; opacity: .25;
+  }
+  .posmark.vue { opacity: 1; }
+  .noir3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; text-align: center; }
+  .noir3 span { display: block; font-size: 12px; color: var(--muted); }
+  .vbar { height: 70px; width: 28px; margin: 0 auto 4px; background: var(--track); border-radius: 6px; position: relative; overflow: hidden; }
+  .vbar > div { position: absolute; bottom: 0; left: 0; right: 0; height: 0; background: var(--text); transition: height 90ms linear; }
+
   .mot-warn { color: var(--warn); font-size: 13px; margin: -4px 0 12px; }
   .mot-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 620px) { .mot-layout { grid-template-columns: 1fr; } }
@@ -201,6 +219,43 @@
     <section class="panel c12">
       <h2>Capteurs de couleur (3 x TCS34725, sous le rover)</h2>
       <div class="cols" id="colList"></div>
+    </section>
+
+    <section class="panel c12">
+      <h2>Suivi de ligne noire</h2>
+      <div class="ligne-grid">
+        <div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+            <button class="primary cmdl" id="btnLigne" disabled>Demarrer le suivi</button>
+            <button class="cmdl" id="btnCalib" disabled>Calibrer (4 s)</button>
+            <span class="badge muted" id="lgCal">--</span>
+          </div>
+          <p class="small muted" style="margin:8px 0 12px">
+            Calibrer : pendant les 4 s, faire glisser le rover a la main de part et d'autre de la ligne,
+            pour que chacun des 3 capteurs voie le sol puis la ligne. La calibration reste en memoire.
+            Le suivi s'arrete si la ligne est perdue 1,5 s, et fait une pause devant un obstacle (&lt; 15 cm).
+          </p>
+          <div class="reglage"><label for="lgV">Vitesse</label><input type="range" id="lgV" min="40" max="200" step="5" value="90"><b class="num" id="lgVv">90</b></div>
+          <div class="reglage"><label for="lgKp">Kp (correction)</label><input type="range" id="lgKp" min="0" max="250" step="5" value="80"><b class="num" id="lgKpv">80</b></div>
+          <div class="reglage"><label for="lgKd">Kd (amortissement)</label><input type="range" id="lgKd" min="0" max="20" step="0.5" value="4"><b class="num" id="lgKdv">4</b></div>
+          <p class="small muted" style="margin:6px 0 0">Le rover zigzague : baisser Kp ou monter Kd. Il sort dans les virages : monter Kp ou baisser la vitesse.</p>
+        </div>
+        <div>
+          <div class="mot-tete"><span class="muted">Etat</span><b id="lgEtat" class="big" style="font-size:22px">--</b></div>
+          <div class="posbar" aria-label="Position de la ligne">
+            <div class="poscentre"></div><div class="posmark" id="lgPos"></div>
+          </div>
+          <div class="small muted" style="display:flex; justify-content:space-between">
+            <span>ligne a gauche</span><span>position <b class="num" id="lgPosv">--</b></span><span>ligne a droite</span>
+          </div>
+          <div class="noir3">
+            <div><div class="vbar"><div id="lgD0"></div></div><span>gauche</span><b class="num" id="lgDv0">--</b></div>
+            <div><div class="vbar"><div id="lgD1"></div></div><span>centre</span><b class="num" id="lgDv1">--</b></div>
+            <div><div class="vbar"><div id="lgD2"></div></div><span>droite</span><b class="num" id="lgDv2">--</b></div>
+          </div>
+          <p class="small muted" style="margin:6px 0 0; text-align:center">noirceur vue par chaque capteur (0 = sol, 1 = ligne)</p>
+        </div>
+      </div>
     </section>
 
     <section class="panel c7">
@@ -503,6 +558,7 @@
     (j.tof || []).forEach((t, i) => { d[i] = afficherDistance(i, t); });
     const c = (j.col || []).map((k, i) => afficherCouleur(i, k));
     afficherImu(j.imu);
+    afficherLigne(j.ligne);
     const v = afficherMoteurs(j.mot);
     if (j.net) setTxt($("netInfo"), j.net.ok
       ? `WiFi ${j.net.ip} · ${j.net.rssi} dBm · ${j.net.clients} client(s)`
@@ -746,7 +802,7 @@
     $("btnReset").disabled = !port;
     const actif = on && connecte();
     $("sendInput").disabled = $("sendBtn").disabled = !actif;
-    document.querySelectorAll(".cmd").forEach(b => b.disabled = !actif);
+    document.querySelectorAll(".cmd, .cmdl").forEach(b => b.disabled = !actif);
     $("baud").disabled = !!port;
     $("adrWifi").disabled = !!ws;
   }
@@ -887,6 +943,63 @@
   };
 
   document.querySelectorAll(".cmd").forEach(b => b.onclick = () => envoyer(b.dataset.cmd));
+
+  // ---------- suivi de ligne ----------
+  let etatLigne = "ARRET", reglageTouche = 0, minuteurReglage = null;
+  const NOMS_LIGNE = { ARRET: "Arret", SUIT: "Suit la ligne", PERDUE: "Ligne perdue...",
+                       OBSTACLE: "Obstacle : pause", CALIBRATION: "Calibration..." };
+  const REGLAGES = [["lgV", "v", 0], ["lgKp", "kp", 0], ["lgKd", "kd", 1]];
+
+  function afficherLigne(l) {
+    if (!l) return;
+    etatLigne = l.e;
+    setTxt($("lgEtat"), NOMS_LIGNE[l.e] || l.e);
+    const enMarche = l.e === "SUIT" || l.e === "PERDUE" || l.e === "OBSTACLE";
+    const bl = $("btnLigne");
+    setTxt(bl, enMarche ? "Arreter le suivi" : "Demarrer le suivi");
+    bl.classList.toggle("stop", enMarche);
+    bl.classList.toggle("primary", !enMarche);
+    const b = $("lgCal");
+    setTxt(b, l.cal ? "calibre" : "non calibre");
+    b.className = "badge " + (l.cal ? "s-ok" : "s-err");
+    const vue = l.cal && l.d[0] + l.d[1] + l.d[2] >= 0.35;
+    const m = $("lgPos");
+    m.style.left = (50 + l.pos * 46) + "%";
+    m.classList.toggle("vue", vue);
+    setTxt($("lgPosv"), vue ? (l.pos >= 0 ? "+" : "") + l.pos.toFixed(2) : "--");
+    l.d.forEach((x, i) => {
+      $("lgD" + i).style.height = (l.cal ? x * 100 : 0) + "%";
+      setTxt($("lgDv" + i), l.cal ? x.toFixed(2) : "--");
+    });
+    // valeurs du rover, sauf pendant qu'on regle un curseur
+    if (performance.now() - reglageTouche > 1500) {
+      for (const [id, cle, dec] of REGLAGES) {
+        if ($(id).value != l[cle]) $(id).value = l[cle];
+        setTxt($(id + "v"), Number(l[cle]).toFixed(dec));
+      }
+    }
+  }
+
+  $("btnLigne").onclick = () => {
+    if (etatLigne === "SUIT" || etatLigne === "PERDUE" || etatLigne === "OBSTACLE") {
+      envoyer("L 0\n");
+    } else {
+      // pas de commande manuelle en parallele : elle arreterait le suivi
+      pilotageGlobal = null; consignes.fill(0); majCurseurs(); dernierEnvoiNul = true;
+      envoyer("L 1\n");
+    }
+  };
+  $("btnCalib").onclick = () => envoyer("K\n");
+
+  for (const [id, , dec] of REGLAGES) {
+    $(id).addEventListener("input", () => {
+      reglageTouche = performance.now();
+      setTxt($(id + "v"), Number($(id).value).toFixed(dec));
+      clearTimeout(minuteurReglage);
+      minuteurReglage = setTimeout(() =>
+        envoyer(`P ${$("lgKp").value} ${$("lgKd").value} ${$("lgV").value}\n`), 300);
+    });
+  }
   $("sendForm").addEventListener("submit", (e) => {
     e.preventDefault();
     const v = $("sendInput").value;
@@ -924,7 +1037,7 @@
         tof: [
           { n: "avant", m: "VL53L1X", d: Math.round(700 + 500 * Math.sin(s / 2)), s: "ok", p: 4000, st: "range valid" },
           { n: "arriere", m: "VL53L0X", d: 8191, s: "hp", p: 1200 },
-          { n: "droite", m: "VL53L0X", d: 8191, s: "nf", p: 1200 },
+          { n: "droite", m: "VL53L0X", d: 8191, s: "hp", p: 250 },
           { n: "gauche", m: "VL53L0X", d: Math.round(300 + 200 * Math.cos(s)), s: "ok", p: 600 },
         ],
         col: [
@@ -934,6 +1047,11 @@
         ],
         imu: { cap: capD, gx: .1, gy: -.2, gz, ax: .01, ay: -.02, az: 1, temp: 31.4, biais: -.018 },
         mot: { stby: eff.some(v => v) ? 1 : 0, m },
+        ligne: (() => {
+          const pos = Math.sin(s / 2) * 0.8;
+          return { e: "SUIT", pos, cal: 1, kp: 80, kd: 4, v: 90,
+                   d: [Math.max(0, -pos), 1 - Math.abs(pos), Math.max(0, pos)] };
+        })(),
       }));
       if (t % 1000 === 0) traiterLigne(`-------- t=${s.toFixed(1)} s -------- (demo)`);
     }, 50);

@@ -31,6 +31,7 @@ void moteursActiver(bool actif);       // STBY des 2 TB6612FNG
 bool moteursActive();
 bool moteursActifs();                  // au moins une consigne non nulle
 
+void moteursCotes(int droite, int gauche);   // M1+M3 / M2+M4
 void avancer(int v);
 void reculer(int v);
 void tournerDroite(int v);             // sur place : droite recule, gauche avance

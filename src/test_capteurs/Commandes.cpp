@@ -2,6 +2,7 @@
 
 #include "Gyro.h"
 #include "Moteurs.h"
+#include "SuiviLigne.h"
 #include "Telemetrie.h"
 
 static unsigned long derniereCommandeMoteurs = 0;
@@ -20,14 +21,31 @@ void arreterMoteurs() {
   moteursActiver(false);
 }
 
+void arretGeneral() {
+  suiviLigneArreter("[LIGNE] arret");
+  arreterMoteurs();
+}
+
 static void executerLigne(Lecteur &l) {
   l.ligne[l.lg] = 0;
+  char cmd = toupper(l.ligne[0]);
+  const char* args = l.ligne + 1;
   int v[4];
-  if ((l.ligne[0] == 'A' || l.ligne[0] == 'a') &&
-      sscanf(l.ligne + 1, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]) == 4) {
+  float kp, kd;
+
+  if (cmd == 'A' && sscanf(args, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]) == 4) {
+    // une commande manuelle reprend la main sur le suivi de ligne
+    if (suiviLigneOccupe()) suiviLigneArreter("[LIGNE] arret : commande manuelle");
     derniereCommandeMoteurs = millis();
     for (int i = 0; i < 4; i++) moteurAppliquer(i, v[i]);
     moteursActiver(moteursActifs());
+  } else if (cmd == 'L' && sscanf(args, "%d", &v[0]) == 1) {
+    if (v[0]) suiviLigneDemarrer();
+    else suiviLigneArreter("[LIGNE] arret demande");
+  } else if (cmd == 'K' && l.lg == 1) {
+    suiviLigneCalibrer();
+  } else if (cmd == 'P' && sscanf(args, "%f %f %d", &kp, &kd, &v[0]) == 3) {
+    suiviLigneReglages(kp, kd, v[0]);
   } else if (l.lg) {
     journal("Commande inconnue : %s", l.ligne);
   }
@@ -38,14 +56,14 @@ static void traiterCaractere(Lecteur &l, char ch) {
   if (ch == '\n' || ch == '\r') { executerLigne(l); return; }
   if (l.lg == 0) {
     if (ch == 'c' || ch == 'C') {
-      arreterMoteurs();   // la calibration bloque 1,5 s : rien ne doit tourner
+      arretGeneral();     // la calibration bloque 1,5 s : rien ne doit tourner
       journal("[GYRO] calibration, ne pas bouger le rover");
       gyroCalibrer();
       journal("[GYRO] biais Z = %.4f deg/s", gyroBiaisZ());
       return;
     }
     if (ch == 'z' || ch == 'Z') { gyroRemettreCap(); journal("Cap remis a zero"); return; }
-    if (ch == 's' || ch == 'S') { arreterMoteurs(); journal("[MOT] arret"); return; }
+    if (ch == 's' || ch == 'S') { arretGeneral(); journal("[MOT] arret"); return; }
     if (ch == ' ') return;
   }
   if (l.lg < sizeof(l.ligne) - 1) l.ligne[l.lg++] = ch;
@@ -62,6 +80,7 @@ void commandesTraiterWifi(const char* texte, size_t n) {
 }
 
 void commandesSurveiller() {
+  if (suiviLigneOccupe()) return;   // le suivi de ligne pilote les moteurs
   if (moteursActifs() &&
       millis() - derniereCommandeMoteurs > DELAI_SECURITE_MOTEURS_MS) {
     arreterMoteurs();

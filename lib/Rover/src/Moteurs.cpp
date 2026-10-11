@@ -83,17 +83,17 @@ bool moteursActifs() {
   return false;
 }
 
-static void appliquerCotes(int droite, int gauche) {
+void moteursCotes(int droite, int gauche) {
   moteurAppliquer(M1, droite);
   moteurAppliquer(M3, droite);
   moteurAppliquer(M2, gauche);
   moteurAppliquer(M4, gauche);
 }
 
-void avancer(int v)       { appliquerCotes(v, v); }
-void reculer(int v)       { appliquerCotes(-v, -v); }
-void tournerDroite(int v) { appliquerCotes(-v, v); }
-void tournerGauche(int v) { appliquerCotes(v, -v); }
+void avancer(int v)       { moteursCotes(v, v); }
+void reculer(int v)       { moteursCotes(-v, -v); }
+void tournerDroite(int v) { moteursCotes(-v, v); }
+void tournerGauche(int v) { moteursCotes(v, -v); }
 
 long moteurCompte(uint8_t i) {
   noInterrupts();

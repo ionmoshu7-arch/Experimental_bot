@@ -24,6 +24,7 @@ struct CapteurToF {
   const char* modele;
   int porteeMm;       // portee reelle mesuree (feuille Calibration)
   bool fiable;        // false : lu et affiche, ignore pour decider
+                      // (passer a false un capteur qui devient defaillant)
   bool present;
   int brut;           // derniere valeur renvoyee par la bibliotheque
   uint8_t statutL1X;  // VL53L1X uniquement : range_status

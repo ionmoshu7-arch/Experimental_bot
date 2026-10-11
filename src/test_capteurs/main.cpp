@@ -20,7 +20,8 @@
  * Fichiers :
  *   main.cpp        demarrage et boucle
  *   Telemetrie.cpp  bloc texte + trames [DATA] JSON
- *   Commandes.cpp   commandes (c, z, s, A ...) et securite moteurs
+ *   Commandes.cpp   commandes (c, z, s, A, L, K, P) et securite moteurs
+ *   SuiviLigne.cpp  suivi de ligne noire (3 capteurs de couleur, PD)
  *   Reseau.cpp      WiFi, page web, WebSocket, mises a jour OTA
  *   lib/Rover/      materiel commun (moteurs, capteurs, gyro, bus)
  * ------------------------------------------------------------
@@ -36,6 +37,7 @@
 
 #include "Commandes.h"
 #include "Reseau.h"
+#include "SuiviLigne.h"
 #include "Telemetrie.h"
 
 #if __has_include("secrets.h")
@@ -75,6 +77,9 @@ void setup() {
   }
   inventaireAfficherDistance();
   inventaireAfficherCouleur();
+  suiviLigneInit();
+  Serial.printf("  Suivi de ligne         %s\n",
+                suiviLigneInfo().calibre ? "calibre" : "a calibrer (bouton Calibrer de la page)");
 
   if (gyroInit()) {
     Serial.println("  MPU-6500 0x68          OK (+/-250 deg/s)");
@@ -85,8 +90,8 @@ void setup() {
   }
   // --- WiFi : pilotage et suivi depuis la page web ---
   reseauSurMessage(commandesTraiterWifi);
-  reseauSurDeconnexion(arreterMoteurs);   // page fermee ou reseau coupe
-  reseauSurOta(arreterMoteurs);           // rien ne tourne pendant une mise a jour
+  reseauSurDeconnexion(arretGeneral);     // page fermee ou reseau coupe
+  reseauSurOta(arretGeneral);             // rien ne tourne pendant une mise a jour
   reseauDemarrer(WIFI_SSID, WIFI_MOT_DE_PASSE, OTA_MOT_DE_PASSE, PAGE_CONTROLE);
   Serial.println("================================================");
 
@@ -102,6 +107,7 @@ void loop() {
   gyroMettreAJour();
   distanceMettreAJour();
   couleurMettreAJour();
+  suiviLigneMettreAJour();
   moteursCalculerVitesses();
   commandesSurveiller();
 

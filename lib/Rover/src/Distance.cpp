@@ -9,13 +9,12 @@
 static VL53L1X tofAvant;
 static VL53L0X tofArriere, tofDroite, tofGauche;
 
-// Etat au 01.09.26 (Suivi n.52 et 54) : le VL53L0X droit est
-// DEFAILLANT (renvoie 8191, ne reagit qu'a moins de 10,5 cm).
-// Passer fiable a true une fois remplace par celui de reserve.
+// Le VL53L0X droit fonctionne mais ne mesure que jusqu'a 25 cm :
+// au-dela il renvoie 8190/8191, compte comme "rien a moins de 25 cm".
 CapteurToF tof[4] = {
   { "avant",   "VL53L1X", 4000, true,  false, -1, 0, M_JAMAIS_LU, 0 },
   { "arriere", "VL53L0X", 1200, true,  false, -1, 0, M_JAMAIS_LU, 0 },
-  { "droite",  "VL53L0X", 1200, false, false, -1, 0, M_JAMAIS_LU, 0 },
+  { "droite",  "VL53L0X",  250, true,  false, -1, 0, M_JAMAIS_LU, 0 },
   { "gauche",  "VL53L0X",  600, true,  false, -1, 0, M_JAMAIS_LU, 0 }
 };
 

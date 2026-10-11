@@ -230,8 +230,8 @@ const char* evitementNomEtat() {
  *                     augmenter s'il frotte un mur.
  *   ANGLE_VIRAGE_DEG  augmenter s'il retrouve le meme obstacle
  *                     apres avoir tourne.
- *   tof[].fiable      (lib/Rover/src/Distance.cpp) passer a true le
- *                     capteur droit une fois remplace (Suivi n.54).
+ *   tof[]             (lib/Rover/src/Distance.cpp) portee et fiabilite
+ *                     de chaque capteur (droite : 25 cm seulement).
  *
  * LIMITE CONNUE
  *   4,5 % d'ecart de vitesse entre cotes droit et gauche : le rover
