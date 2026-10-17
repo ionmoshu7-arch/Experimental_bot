@@ -1,5 +1,7 @@
 #include "Camera.h"
 
+#include <Preferences.h>
+
 // Brochages connus des cartes ESP32-S3 camera : essayes dans l'ordre
 // jusqu'a ce que le capteur reponde.
 struct Brochage {
@@ -45,7 +47,9 @@ static bool essayer(const Brochage &b) {
   c.pin_sccb_scl = b.sioc;
   c.pin_pwdn = b.pwdn;
   c.pin_reset = b.reset;
-  c.xclk_freq_hz = 20000000;
+  // 10 MHz plutot que 20 : les harmoniques de l'horloge camera perturbent
+  // moins le WiFi 2,4 GHz (debit WiFi bien plus stable)
+  c.xclk_freq_hz = 10000000;
   c.pixel_format = PIXFORMAT_JPEG;
   c.frame_size = FRAMESIZE_VGA;
   c.jpeg_quality = 12;
@@ -141,3 +145,24 @@ float cameraImagesParSeconde() {
   }
   return ips;
 }
+
+static int rotation = 90;   // camera montee de cote : 90 deg vers la droite
+
+void cameraChargerRotation() {
+  Preferences prefs;
+  prefs.begin("camera", true);
+  rotation = prefs.getInt("rotation", 90);
+  prefs.end();
+}
+
+bool cameraRotation(int degres) {
+  if (degres != 0 && degres != 90 && degres != 180 && degres != 270) return false;
+  rotation = degres;
+  Preferences prefs;
+  prefs.begin("camera", false);
+  prefs.putInt("rotation", rotation);
+  prefs.end();
+  return true;
+}
+
+int cameraRotationActuelle() { return rotation; }

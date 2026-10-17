@@ -11,7 +11,7 @@ static const unsigned long PERIODE_ETAT_MS = 1000;
 static const unsigned long ATTENTE_RECHERCHE_MS = 5000;
 
 static WebSocketsClient ws;
-static bool demarre = false, connectee = false;
+static bool demarre = false, connectee = false, active = true;
 static IPAddress ipRover;
 static unsigned long derniereRecherche = 0, dernierEtat = 0, derniereTrame = 0;
 
@@ -55,8 +55,19 @@ void liaisonRoverDemarrer() {
   ws.setReconnectInterval(3000);
 }
 
+void liaisonRoverActiver(bool a) {
+  active = a;
+  if (!active && demarre) {
+    ws.disconnect();
+    demarre = connectee = false;
+  }
+  Serial.println(active ? "[LIAISON] activee" : "[LIAISON] coupee");
+}
+
+bool liaisonRoverActive() { return active; }
+
 void liaisonRoverMettreAJour() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (!active || WiFi.status() != WL_CONNECTED) return;
   unsigned long maintenant = millis();
 
   if (!demarre) {

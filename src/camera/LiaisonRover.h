@@ -16,4 +16,6 @@
 void liaisonRoverDemarrer();
 void liaisonRoverMettreAJour();     // a appeler a chaque tour de boucle
 bool liaisonRoverConnectee();
+void liaisonRoverActiver(bool active);      // coupe / retablit la liaison
+bool liaisonRoverActive();
 unsigned long liaisonRoverDerniereTrame();   // millis() de la derniere [DATA]

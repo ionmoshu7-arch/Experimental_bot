@@ -124,9 +124,21 @@ void reseauSurMessage(RappelTexte rappel)       { rappelMessage = rappel; }
 void reseauSurDeconnexion(RappelSimple rappel)  { rappelDeconnexion = rappel; }
 void reseauSurOta(RappelSimple rappel)          { rappelOta = rappel; }
 
+// Les pages recoivent tout (20 trames/s). La camera ne recoit qu'une
+// trame [DATA] sur 10 (2/s) : a 20/s, son WiFi saturait et la video
+// tombait a moins d'une image par seconde.
+static const unsigned long PERIODE_DATA_CAMERA_MS = 500;
+static unsigned long dernierDataCamera = 0;
+
 void reseauDiffuser(const char* texte, size_t longueur) {
-  if (webSocket.connectedClients() > 0)
-    webSocket.broadcastTXT((const uint8_t*) texte, longueur);
+  if (webSocket.connectedClients() == 0) return;
+  bool estData = longueur >= 6 && !memcmp(texte, "[DATA]", 6);
+  bool pourCamera = !estData || millis() - dernierDataCamera >= PERIODE_DATA_CAMERA_MS;
+  if (estData && pourCamera) dernierDataCamera = millis();
+  for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++) {
+    if (estCamera[i] && !pourCamera) continue;
+    webSocket.sendTXT(i, (const uint8_t*) texte, longueur);   // ignore si client absent
+  }
 }
 
 bool reseauConnecte()  { return WiFi.status() == WL_CONNECTED; }

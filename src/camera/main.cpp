@@ -17,6 +17,7 @@
  *   Camera.cpp         capteur OV2640 (resolution, qualite, images/s)
  *   ServeurCamera.cpp  serveurs HTTP : video, photo, reglages, etat
  *   Stockage.cpp       carte TF : photos
+ *   Enregistrement.cpp video AVI a la demande sur la carte TF
  *   LiaisonRover.cpp   synchronisation avec le rover
  * Identifiants WiFi : include/secrets.h (non versionne), comme le rover.
  * ------------------------------------------------------------
@@ -28,6 +29,7 @@
 #include <ArduinoOTA.h>
 
 #include "Camera.h"
+#include "Enregistrement.h"
 #include "LiaisonRover.h"
 #include "ServeurCamera.h"
 #include "Stockage.h"
@@ -63,8 +65,10 @@ void setup() {
                 (unsigned) (ESP.getPsramSize() / 1024), (unsigned) (ESP.getFlashChipSize() >> 20));
 
   bool cam = cameraInit();
+  cameraChargerRotation();
   Serial.printf("  Camera : %s\n", cam ? cameraModele() : "ERREUR (nappe bien enfoncee ?)");
   stockageInit();
+  enregistrementInit();
 
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(NOM_HOTE);
@@ -90,6 +94,7 @@ void loop() {
                   NOM_HOTE, WiFi.localIP().toString().c_str(), WiFi.RSSI());
     Serial.printf("[WIFI] video : http://%s:%u/stream\n",
                   WiFi.localIP().toString().c_str(), PORT_FLUX);
+    WiFi.setSleep(false);                     // economie d'energie WiFi coupee (latence)
     if (!otaDemarre) demarrerOta();
   } else if (!connecte && etaitConnecte) {
     Serial.println("[WIFI] connexion perdue, reconnexion automatique...");

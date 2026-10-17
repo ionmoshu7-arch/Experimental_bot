@@ -5,6 +5,7 @@
 #include <SD_MMC.h>
 #include "esp_http_server.h"
 #include "Camera.h"
+#include "Enregistrement.h"
 #include "LiaisonRover.h"
 #include "Stockage.h"
 
@@ -22,14 +23,17 @@ void etatCameraJson(char* buf, size_t taille) {
   String ip = WiFi.localIP().toString();
   snprintf(buf, taille,
            "{\"ip\":\"%s\",\"flux\":\"http://%s:%u/stream\",\"modele\":\"%s\","
-           "\"res\":\"%s\",\"qualite\":%d,\"vflip\":%d,\"miroir\":%d,\"ips\":%.1f,"
+           "\"res\":\"%s\",\"qualite\":%d,\"vflip\":%d,\"miroir\":%d,\"rotation\":%d,\"ips\":%.1f,"
            "\"ecrans\":%d,\"sd\":%d,\"photos\":%d,\"libreMo\":%u,\"rssi\":%d,"
-           "\"rover\":%d,\"psramLibreKo\":%u}",
+           "\"rover\":%d,\"psramLibreKo\":%u,\"rec\":%d,\"recSec\":%d,\"recMax\":%d,"
+           "\"recFichier\":\"%s\",\"videos\":%d}",
            ip.c_str(), ip.c_str(), PORT_FLUX, cameraModele(), cameraNomResolution(),
-           cameraQualiteActuelle(), cameraRetourneeV(), cameraMiroir(),
+           cameraQualiteActuelle(), cameraRetourneeV(), cameraMiroir(), cameraRotationActuelle(),
            cameraImagesParSeconde(), nbFlux, stockagePresent(), stockageNbPhotos(),
            stockageLibreMo(), WiFi.RSSI(), liaisonRoverConnectee(),
-           (unsigned) (ESP.getFreePsram() / 1024));
+           (unsigned) (ESP.getFreePsram() / 1024), enregistrementEnCours(),
+           enregistrementSecondes(), DUREE_MAX_S, enregistrementFichier(),
+           enregistrementNbVideos());
 }
 
 static void autoriserOrigines(httpd_req_t* req) {
@@ -50,7 +54,8 @@ static esp_err_t pageAccueil(httpd_req_t* req) {
     "<meta name=viewport content='width=device-width,initial-scale=1'>"
     "<title>Camera rover</title><body style='font-family:system-ui;margin:16px'>"
     "<h1 style='font-size:20px'>Camera du rover</h1>"
-    "<img src='http://" + ip + ":81/stream' style='max-width:100%;border-radius:8px'>"
+    "<img src='http://" + ip + ":81/stream' style='max-width:100%;border-radius:8px;"
+    "transform:rotate(" + String(cameraRotationActuelle()) + "deg)'>"
     "<p><a href='/capture'>Image</a> &middot; <a href='/photo'>Photo sur la carte TF</a>"
     " &middot; <a href='/status'>Etat</a></p>"
     "<p>Page complete : celle du rover (http://rover.local/).</p></body></html>";
@@ -91,19 +96,30 @@ static esp_err_t lireFichier(httpd_req_t* req) {
   char requete[96], chemin[64];
   if (httpd_req_get_url_query_str(req, requete, sizeof(requete)) != ESP_OK ||
       httpd_query_key_value(requete, "f", chemin, sizeof(chemin)) != ESP_OK ||
-      strncmp(chemin, "/photos/", 8) != 0 || strstr(chemin, "..")) {
+      (strncmp(chemin, "/photos/", 8) != 0 && strncmp(chemin, "/videos/", 8) != 0) ||
+      strstr(chemin, "..")) {
     httpd_resp_send_404(req);
     return ESP_FAIL;
   }
   File f = SD_MMC.open(chemin);
   if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
   autoriserOrigines(req);
-  httpd_resp_set_type(req, "image/jpeg");
-  uint8_t tampon[2048];
+  bool video = !strncmp(chemin, "/videos/", 8);
+  httpd_resp_set_type(req, video ? "video/x-msvideo" : "image/jpeg");
+  if (video) {   // une video se telecharge : le navigateur ne lit pas l'AVI
+    char dispo[64];
+    snprintf(dispo, sizeof(dispo), "attachment; filename=%s", strrchr(chemin, '/') + 1);
+    httpd_resp_set_hdr(req, "Content-Disposition", dispo);
+  }
+  // tampon hors de la pile (la tache du serveur n'a que quelques Ko)
+  const size_t TAILLE_TAMPON = 8192;
+  uint8_t* tampon = (uint8_t*) malloc(TAILLE_TAMPON);
+  if (!tampon) { f.close(); httpd_resp_send_500(req); return ESP_FAIL; }
   size_t n;
-  while ((n = f.read(tampon, sizeof(tampon))) > 0) {
+  while ((n = f.read(tampon, TAILLE_TAMPON)) > 0) {
     if (httpd_resp_send_chunk(req, (const char*) tampon, n) != ESP_OK) break;
   }
+  free(tampon);
   f.close();
   return httpd_resp_send_chunk(req, nullptr, 0);
 }
@@ -124,10 +140,16 @@ static esp_err_t controle(httpd_req_t* req) {
     return envoyerJson(req, "{\"ok\":0,\"erreur\":\"var et val attendus\"}");
   }
   bool ok = true;
-  if (!strcmp(var, "res"))          ok = cameraResolution(val);
+  if (!strcmp(var, "res"))          ok = !enregistrementEnCours() && cameraResolution(val);
   else if (!strcmp(var, "qualite")) ok = cameraQualite(atoi(val));
   else if (!strcmp(var, "vflip"))   cameraRetourner(atoi(val), cameraMiroir());
   else if (!strcmp(var, "miroir"))  cameraRetourner(cameraRetourneeV(), atoi(val));
+  else if (!strcmp(var, "rotation")) ok = cameraRotation(atoi(val));
+  else if (!strcmp(var, "liaison")) liaisonRoverActiver(atoi(val));
+  else if (!strcmp(var, "video")) {
+    if (atoi(val)) ok = enregistrementDemarrer();
+    else enregistrementArreter();
+  }
   else ok = false;
   Serial.printf("[CAM] reglage %s = %s : %s\n", var, val, ok ? "ok" : "refuse");
   return status(req);
@@ -162,6 +184,7 @@ void serveurCameraDemarrer() {
   cfg.server_port = PORT_HTTP;
   cfg.ctrl_port = 32768;
   cfg.max_uri_handlers = 8;
+  cfg.stack_size = 8192;
   if (httpd_start(&serveurHttp, &cfg) == ESP_OK) {
     httpd_uri_t pages[] = {
       { "/",        HTTP_GET, pageAccueil, nullptr },
