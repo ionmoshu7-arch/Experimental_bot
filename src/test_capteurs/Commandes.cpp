@@ -32,6 +32,19 @@ static bool modeAutonome() {
   return suiviLigneOccupe() || navigationActive();
 }
 
+// une commande manuelle reprend la main sur les modes autonomes
+static void reprendreLaMain() {
+  if (suiviLigneOccupe()) suiviLigneArreter("[LIGNE] arret : commande manuelle");
+  if (navigationActive()) navigationArreter("[NAV] arret : commande manuelle");
+  derniereCommandeMoteurs = millis();
+}
+
+void commandeManuelle(int droite, int gauche) {
+  reprendreLaMain();
+  moteursCotes(droite, gauche);
+  moteursActiver(moteursActifs());
+}
+
 static void executerLigne(Lecteur &l) {
   l.ligne[l.lg] = 0;
   char cmd = toupper(l.ligne[0]);
@@ -40,10 +53,7 @@ static void executerLigne(Lecteur &l) {
   float kp, kd;
 
   if (cmd == 'A' && sscanf(args, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]) == 4) {
-    // une commande manuelle reprend la main sur les modes autonomes
-    if (suiviLigneOccupe()) suiviLigneArreter("[LIGNE] arret : commande manuelle");
-    if (navigationActive()) navigationArreter("[NAV] arret : commande manuelle");
-    derniereCommandeMoteurs = millis();
+    reprendreLaMain();
     for (int i = 0; i < 4; i++) moteurAppliquer(i, v[i]);
     moteursActiver(moteursActifs());
   } else if (cmd == 'L' && sscanf(args, "%d", &v[0]) == 1) {

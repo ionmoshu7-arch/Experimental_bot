@@ -25,6 +25,7 @@
  *   Navigation.cpp  navigation autonome : cap au gyroscope, obstacles,
  *                   detection de collision
  *   Reseau.cpp      WiFi, page web, WebSocket, mises a jour OTA
+ *   RemoteXYControle.cpp  pilotage par l'application RemoteXY (port 6377)
  *   lib/Rover/      materiel commun (moteurs, capteurs, gyro, bus)
  * ------------------------------------------------------------
  */
@@ -39,6 +40,7 @@
 
 #include "Commandes.h"
 #include "Navigation.h"
+#include "RemoteXYControle.h"
 #include "Reseau.h"
 #include "SuiviLigne.h"
 #include "Telemetrie.h"
@@ -96,6 +98,7 @@ void setup() {
   reseauSurDeconnexion(arretGeneral);     // page fermee ou reseau coupe
   reseauSurOta(arretGeneral);             // rien ne tourne pendant une mise a jour
   reseauDemarrer(WIFI_SSID, WIFI_MOT_DE_PASSE, OTA_MOT_DE_PASSE, PAGE_CONTROLE);
+  remoteXYDemarrer();                     // application telephone, meme WiFi
   Serial.println("================================================");
 
   telemetrieDemarrer();
@@ -103,6 +106,7 @@ void setup() {
 
 void loop() {
   reseauMettreAJour();
+  remoteXYMettreAJour();
   commandesLire();
 
   // Aucune lecture n'attend : chaque capteur n'est lu que s'il a une

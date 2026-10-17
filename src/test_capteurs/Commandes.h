@@ -30,3 +30,6 @@ void commandesTraiterWifi(const char* texte, size_t n);  // message WebSocket
 void commandesSurveiller();   // arret de securite des moteurs
 void arreterMoteurs();        // consignes a 0 et STBY a LOW
 void arretGeneral();          // arrete le suivi de ligne et les moteurs
+// Pilotage manuel par cote (joystick RemoteXY) : comme la commande A,
+// arrete les modes autonomes ; a repeter < 400 ms
+void commandeManuelle(int droite, int gauche);
