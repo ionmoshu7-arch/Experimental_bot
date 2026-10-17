@@ -9,8 +9,11 @@
  * Tant que ce fichier n'existe pas, RemoteXY est simplement desactive.
  * Elements attendus : voir docs/RemoteXY.md.
  *
+ * Interface actuelle : joystick, curseur de vitesse, selecteur de mode
+ * (A manuel, B suivi de ligne, C navigation), bouton STOP.
+ *
  * Securite : joystick relache -> moteurs arretes ; application
- * deconnectee -> tout s'arrete.
+ * deconnectee -> tout s'arrete ; toucher le joystick repasse en manuel.
  */
 #pragma once
 

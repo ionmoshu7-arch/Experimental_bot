@@ -1,14 +1,16 @@
-# Choisit le port serie d'une carte d'apres le numero de serie de sa puce USB.
+# Choisit le port serie d'une carte d'apres sa puce USB.
 #
-# Le rover et la camera utilisent la meme puce (CH343) : Windows peut leur
-# donner n'importe quel numero de COM. Sans ce script, PlatformIO pourrait
-# televerser le programme du rover dans la camera, ou l'inverse.
+# Windows peut donner n'importe quel numero de COM au rover (puce CH343,
+# numero de serie unique) et a la camera (puce CH340, sans numero de serie).
+# Sans ce script, PlatformIO pourrait televerser le programme du rover dans
+# la camera, ou l'inverse.
 #
-# Options dans platformio.ini :
-#   custom_usb_serie   = numero de serie de la carte visee (obligatoire)
-#   custom_usb_exclure = numero(s) de serie a ne jamais utiliser, separes par
-#                        des virgules (quand celui de la carte n'est pas connu)
-# Les numeros s'affichent avec : pio device list   (champ SER=...)
+# Options dans platformio.ini (une seule suffit) :
+#   custom_usb_serie   = numero de serie USB de la carte visee
+#   custom_usb_vidpid  = type de puce USB "VID:PID" de la carte visee, pour
+#                        une puce sans numero de serie (CH340 : 1A86:7523)
+#   custom_usb_exclure = numero(s) de serie a ne jamais utiliser
+# Les valeurs s'affichent avec : pio device list   (VID:PID=... SER=...)
 # Sans effet pour un televersement par WiFi (OTA).
 
 Import("env")
@@ -18,12 +20,16 @@ from serial.tools import list_ports
 
 if env.GetProjectOption("upload_protocol", "esptool") == "esptool":
     serie = env.GetProjectOption("custom_usb_serie", "").strip()
+    vidpid = env.GetProjectOption("custom_usb_vidpid", "").strip().upper()
     exclus = [s.strip() for s in env.GetProjectOption("custom_usb_exclure", "").split(",") if s.strip()]
     ports = list(list_ports.comports())
     nom_env = env["PIOENV"]
 
     if serie:
         trouves = [p.device for p in ports if (p.serial_number or "") == serie]
+    elif vidpid:
+        trouves = [p.device for p in ports
+                   if p.vid is not None and "%04X:%04X" % (p.vid, p.pid) == vidpid]
     elif exclus:
         trouves = [p.device for p in ports
                    if p.serial_number and p.serial_number not in exclus and p.vid]
@@ -38,5 +44,5 @@ if env.GetProjectOption("upload_protocol", "esptool") == "esptool":
             sys.stderr.write(
                 "\n[%s] carte introuvable (numero de serie USB %s). "
                 "Est-elle branchee ? Voir : pio device list\n\n"
-                % (nom_env, serie or "autre que " + ", ".join(exclus)))
+                % (nom_env, serie or vidpid or "autre que " + ", ".join(exclus)))
             env.Exit(1)

@@ -19,18 +19,19 @@ par WiFi continuent de fonctionner en même temps.
 
 | Élément RemoteXY | Nom de variable | Réglage | Rôle sur le rover |
 |---|---|---|---|
-| Joystick | `joystick` | — | pilotage manuel (relâché = arrêt) |
+| Joystick | `joystick` | revient au centre | pilotage manuel (relâché = arrêt) |
 | Slider | `slider_vitesse` | 0 à 100 | vitesse maximale du joystick, en % |
-| Switch | `switch_ligne` | — | suivi de ligne ON / OFF |
-| Switch | `switch_nav` | — | navigation autonome ON / OFF |
-| Button | `button_stop` | couleur rouge conseillée | STOP : arrête tout |
-| Text string (indicateur) | `text_etat` | longueur 30 | mode en cours, collisions |
-| Text string (indicateur) | `text_capteurs` | longueur 40 | distances et cap |
+| Select (3 positions) | `selecteur_mode` | A, B, C | A = manuel, B = suivi de ligne, C = navigation |
+| Button | `button_stop` | rouge | STOP : arrête tout, sélecteur sur A |
+
+   C'est l'interface en place dans
+   [RemoteXYInterface.h](../src/test_capteurs/RemoteXYInterface.h) (version gratuite).
+   Elle n'affiche pas d'état sur le téléphone : la page web reste là pour ça.
 
    Ajouter des libellés (« Ligne », « Navigation », « STOP »...) avec l'élément *Label* si
    on le souhaite : ils n'ont pas de variable et ne changent rien au code.
 
-4. Cliquer sur **Get source code** et copier le bloc qui va de
+4. Pour modifier l'écran : cliquer sur **Get source code** et copier le bloc qui va de
    `#pragma pack(push, 1)` à `#pragma pack(pop)` (le tableau `RemoteXY_CONF_PROGMEM`
    et la `struct ... RemoteXY;`).
 5. Le coller dans un nouveau fichier **`src/test_capteurs/RemoteXYInterface.h`**
@@ -58,5 +59,8 @@ Astuce : réserver l'adresse 192.168.129.13 au rover dans la box (bail DHCP fixe
 
 - Joystick relâché : les moteurs s'arrêtent.
 - Application fermée ou WiFi perdu : tout s'arrête (moteurs, suivi de ligne, navigation).
-- Toucher le joystick reprend la main sur le suivi de ligne ou la navigation.
+- Toucher le joystick reprend la main sur le suivi de ligne ou la navigation
+  (le sélecteur revient sur A).
+- Un mode qui s'arrête tout seul (ligne perdue, pas de calibration...) remet
+  aussi le sélecteur sur A.
 - Le bouton STOP de la page web et la touche Espace restent actifs en parallèle.

@@ -9,9 +9,6 @@
 #include "RemoteXYInterface.h"   // genere par remotexy.com : RemoteXY_CONF_PROGMEM + struct RemoteXY
 
 #include "Commandes.h"
-#include "Config.h"
-#include "Distance.h"
-#include "Gyro.h"
 #include "Moteurs.h"
 #include "Navigation.h"
 #include "SuiviLigne.h"
@@ -29,34 +26,42 @@ class ReseauExistant : public CRemoteXYNet {
 };
 
 static const int ZONE_MORTE = 10;                  // joystick -100..100
-static const unsigned long PERIODE_AFFICHAGE_MS = 200;
+
+// Positions du selecteur de mode (A, B, C dans l'application)
+enum ModeTelephone : uint8_t { MODE_MANUEL = 0, MODE_LIGNE = 1, MODE_NAV = 2 };
 
 static bool joystickActif = false;
-static uint8_t ligneAvant = 0, navAvant = 0, stopAvant = 0, connecteAvant = 0;
-static unsigned long dernierAffichage = 0;
+static uint8_t modeAvant = MODE_MANUEL, stopAvant = 0, connecteAvant = 0;
 
 void remoteXYDemarrer() {
   RemoteXYGui* gui = RemoteXYEngine.addGui(RemoteXY_CONF_PROGMEM, &RemoteXY);
   gui->addConnectionServer(new ReseauExistant(), PORT_REMOTEXY);
   RemoteXY.slider_vitesse = 60;   // valeur de depart du curseur, en %
+  RemoteXY.selecteur_mode = MODE_MANUEL;
   Serial.printf("  RemoteXY               port %u (application Android/iOS)\n", PORT_REMOTEXY);
 }
 
-static void afficherEtat() {
-  const char* mode = suiviLigneOccupe() ? "Ligne" : navigationActive() ? "Navigation"
-                   : joystickActif ? "Manuel" : "Arret";
-  const char* detail = suiviLigneOccupe() ? suiviLigneNomEtat()
-                     : navigationActive() ? navigationNomEtat() : "";
-  snprintf(RemoteXY.text_etat, sizeof(RemoteXY.text_etat), "%s %s  col:%d",
-           mode, detail, navigationInfo().collisions);
+// Le selecteur change de position : on lance le mode choisi
+static void changerMode(uint8_t mode) {
+  switch (mode) {
+    case MODE_LIGNE:
+      navigationArreter("[NAV] arret : suivi de ligne");
+      suiviLigneDemarrer();
+      break;
+    case MODE_NAV:
+      suiviLigneArreter("[LIGNE] arret : navigation");
+      navigationDemarrer();
+      break;
+    default:   // manuel : les modes autonomes s'arretent
+      suiviLigneArreter("[LIGNE] arret : mode manuel (RemoteXY)");
+      navigationArreter("[NAV] arret : mode manuel (RemoteXY)");
+      break;
+  }
+}
 
-  char av[16], ar[16], ga[16], dr[16];
-  distanceTexte(CANAL_AVANT, av, sizeof(av), false);
-  distanceTexte(CANAL_ARRIERE, ar, sizeof(ar), false);
-  distanceTexte(CANAL_GAUCHE, ga, sizeof(ga), false);
-  distanceTexte(CANAL_DROITE, dr, sizeof(dr), false);
-  snprintf(RemoteXY.text_capteurs, sizeof(RemoteXY.text_capteurs),
-           "Av%s Ar%s G%s D%s cap%.0f", av, ar, ga, dr, gyroCap());
+// Le selecteur du telephone revient sur A (manuel)
+static void selecteurManuel() {
+  RemoteXY.selecteur_mode = modeAvant = MODE_MANUEL;
 }
 
 void remoteXYMettreAJour() {
@@ -70,6 +75,7 @@ void remoteXYMettreAJour() {
     } else {
       arretGeneral();            // telephone parti : rien ne doit rouler
       joystickActif = false;
+      selecteurManuel();
       journal("[RXY] application RemoteXY deconnectee, arret");
     }
   }
@@ -78,33 +84,22 @@ void remoteXYMettreAJour() {
   // --- STOP ---
   if (RemoteXY.button_stop && !stopAvant) {
     arretGeneral();
+    selecteurManuel();
     journal("[RXY] STOP");
   }
   stopAvant = RemoteXY.button_stop;
 
-  // --- interrupteurs des modes autonomes (sur changement) ---
-  if (RemoteXY.switch_ligne != ligneAvant) {
-    ligneAvant = RemoteXY.switch_ligne;
-    if (ligneAvant) {
-      navigationArreter("[NAV] arret : suivi de ligne");
-      suiviLigneDemarrer();
-    } else {
-      suiviLigneArreter("[LIGNE] arret depuis RemoteXY");
-    }
+  // --- selecteur de mode (sur changement) ---
+  if (RemoteXY.selecteur_mode != modeAvant) {
+    modeAvant = RemoteXY.selecteur_mode;
+    changerMode(modeAvant);
   }
-  if (RemoteXY.switch_nav != navAvant) {
-    navAvant = RemoteXY.switch_nav;
-    if (navAvant) {
-      suiviLigneArreter("[LIGNE] arret : navigation");
-      navigationDemarrer();
-    } else {
-      navigationArreter("[NAV] arret depuis RemoteXY");
-    }
+  // un mode arrete tout seul (ligne perdue, STOP de la page, pas
+  // calibre...) : le selecteur revient sur A
+  if ((modeAvant == MODE_LIGNE && !suiviLigneOccupe()) ||
+      (modeAvant == MODE_NAV && !navigationActive())) {
+    selecteurManuel();
   }
-  // un mode arrete tout seul (ligne perdue, STOP de la page...) :
-  // l'interrupteur du telephone revient a OFF
-  if (RemoteXY.switch_ligne && !suiviLigneOccupe()) RemoteXY.switch_ligne = ligneAvant = 0;
-  if (RemoteXY.switch_nav && !navigationActive())   RemoteXY.switch_nav = navAvant = 0;
 
   // --- joystick : pilotage manuel ---
   int x = RemoteXY.joystick_x, y = RemoteXY.joystick_y;   // -100..100
@@ -114,17 +109,10 @@ void remoteXYMettreAJour() {
     float m = max(100.0f, max(fabsf(gauche), fabsf(droite)));
     commandeManuelle((int) (droite * vmax / m), (int) (gauche * vmax / m));
     joystickActif = true;
-    RemoteXY.switch_ligne = ligneAvant = 0;                // le joystick prend la main
-    RemoteXY.switch_nav = navAvant = 0;
+    selecteurManuel();                                     // le joystick prend la main
   } else if (joystickActif) {
     arreterMoteurs();                                      // joystick relache
     joystickActif = false;
-  }
-
-  // --- retour d'informations vers le telephone ---
-  if (millis() - dernierAffichage >= PERIODE_AFFICHAGE_MS) {
-    dernierAffichage = millis();
-    afficherEtat();
   }
 }
 

@@ -18,6 +18,11 @@ static RappelTexte rappelMessage = nullptr;
 static RappelSimple rappelDeconnexion = nullptr;
 static RappelSimple rappelOta = nullptr;
 
+// La carte camera est un client comme la page, mais elle s'annonce par
+// "[CAM]{...}" : son etat est relaye a la page (et au port serie), et
+// son depart n'arrete pas les moteurs.
+static bool estCamera[WEBSOCKETS_SERVER_CLIENT_MAX] = { false };
+
 static void evenementWebSocket(uint8_t client, WStype_t type, uint8_t* donnees, size_t longueur) {
   switch (type) {
     case WStype_CONNECTED:
@@ -25,10 +30,26 @@ static void evenementWebSocket(uint8_t client, WStype_t type, uint8_t* donnees, 
                     webSocket.remoteIP(client).toString().c_str());
       break;
     case WStype_DISCONNECTED:
+      if (client < WEBSOCKETS_SERVER_CLIENT_MAX && estCamera[client]) {
+        estCamera[client] = false;
+        Serial.println("[CAM] camera deconnectee");
+        break;
+      }
       Serial.printf("[WIFI] client %u deconnecte\n", client);
       if (rappelDeconnexion) rappelDeconnexion();
       break;
     case WStype_TEXT:
+      if (longueur >= 5 && !memcmp(donnees, "[CAM]", 5)) {
+        if (client < WEBSOCKETS_SERVER_CLIENT_MAX && !estCamera[client]) {
+          estCamera[client] = true;
+          Serial.printf("[CAM] camera connectee (%s)\n", webSocket.remoteIP(client).toString().c_str());
+        }
+        Serial.write(donnees, longueur);          // pour la page connectee par USB
+        Serial.println();
+        for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++)
+          if (i != client && !estCamera[i]) webSocket.sendTXT(i, donnees, longueur);
+        break;
+      }
       if (rappelMessage) rappelMessage((const char*) donnees, longueur);
       break;
     default:

@@ -5,6 +5,10 @@
  *   ws://rover.local:81/      donnees [DATA] et commandes, comme l'USB
  *   OTA "rover"               televersement par WiFi (env test_capteurs_ota)
  *
+ * La carte camera se connecte aussi au WebSocket et s'annonce par
+ * "[CAM]{...}" : son etat est relaye aux pages, et sa deconnexion
+ * n'arrete pas les moteurs (seule celle d'une page de pilotage le fait).
+ *
  * La connexion WiFi ne bloque jamais le rover : s'il n'y a pas de
  * reseau, tout fonctionne par USB et le WiFi se reconnecte seul.
  */
