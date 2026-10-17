@@ -4,6 +4,12 @@
  * Fichiers AVI (MJPEG) : /videos/VID_0001.avi, VID_0002.avi...
  * Lisibles avec VLC ou le lecteur de Windows (pas dans le navigateur).
  *
+ * Mesures synchronisees : pendant l'enregistrement, chaque trame [DATA]
+ * du rover (position, pente, distances, encodeurs, gyroscope...) est
+ * ecrite dans /videos/VID_0001.jsonl, une ligne par trame :
+ *     <ms depuis le debut de la video><TAB>{...json du rover...}
+ * Le rover en envoie 10 par seconde pendant l'enregistrement.
+ *
  * Jamais permanent : demarre et s'arrete sur demande (bouton de la page),
  * et s'arrete seul apres DUREE_MAX_S, si la carte est presque pleine
  * ou en cas d'erreur d'ecriture.
@@ -23,4 +29,6 @@ void enregistrementArreter();
 bool enregistrementEnCours();
 int enregistrementSecondes();              // duree du fichier en cours
 const char* enregistrementFichier();       // dernier fichier (en cours ou termine)
+// Trame du rover recue pendant l'enregistrement : ajoutee aux mesures
+void enregistrementMesure(const uint8_t* json, size_t longueur);
 int enregistrementNbVideos();

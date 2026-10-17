@@ -16,6 +16,7 @@ struct Moteur {
   const char* nom;
   uint8_t encA, encB;
   volatile long compte;
+  volatile long compteTotal;   // jamais remis a zero (odometrie)
   volatile uint8_t etatPrec;
   int consigne;
   long comptePrec;
@@ -38,6 +39,7 @@ void tournerDroite(int v);             // sur place : droite recule, gauche avan
 void tournerGauche(int v);
 
 long moteurCompte(uint8_t i);          // lecture protegee des interruptions
+long moteurCompteTotal(uint8_t i);     // depuis le demarrage, jamais remis a zero
 long compteMoyen();                    // moyenne des valeurs absolues
 void moteursRemettreAZero();
 

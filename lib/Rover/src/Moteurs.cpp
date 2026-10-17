@@ -21,7 +21,9 @@ static unsigned long dernierCalculVitesse = 0;
 static void IRAM_ATTR isrEncodeur(void* arg) {
   Moteur* m = (Moteur*) arg;
   uint8_t s = (digitalRead(m->encA) << 1) | digitalRead(m->encB);
-  m->compte += TABLE_QUAD[(m->etatPrec << 2) | s];
+  int8_t pas = TABLE_QUAD[(m->etatPrec << 2) | s];
+  m->compte += pas;
+  m->compteTotal += pas;
   m->etatPrec = s;
 }
 
@@ -98,6 +100,13 @@ void tournerGauche(int v) { moteursCotes(v, -v); }
 long moteurCompte(uint8_t i) {
   noInterrupts();
   long c = moteurs[i].compte;
+  interrupts();
+  return c;
+}
+
+long moteurCompteTotal(uint8_t i) {
+  noInterrupts();
+  long c = moteurs[i].compteTotal;
   interrupts();
   return c;
 }

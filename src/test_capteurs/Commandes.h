@@ -13,6 +13,8 @@
  *       s = 0 pivot, 1 recul, 2 balayage, 3 toutes
  *   N 1 / N 0 + Entree : demarrer / arreter la navigation autonome
  *   Q vitesse + Entree : vitesse de croisiere de la navigation
+ *   O + Entree : nouvelle origine de la carte (position 0, 0)
+ *   T + Entree : pente remise a zero (rover pose sur sol plat)
  *
  * Securite : sans commande moteur depuis 400 ms, tout s'arrete
  * (sauf en mode autonome, qui a ses propres arrets).

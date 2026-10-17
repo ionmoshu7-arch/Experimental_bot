@@ -37,6 +37,8 @@
 #include "Gyro.h"
 #include "Inventaire.h"
 #include "Moteurs.h"
+#include "Odometrie.h"
+#include "Terrain.h"
 
 #include "Commandes.h"
 #include "Navigation.h"
@@ -90,6 +92,7 @@ void setup() {
     Serial.println("  MPU-6500 0x68          OK (+/-250 deg/s)");
     delay(300);
     gyroCalibrer();
+    terrainCalibrer();                    // sol plat du depart = pente nulle
   } else {
     Serial.println("  MPU-6500 0x68          ABSENT");
   }
@@ -101,6 +104,7 @@ void setup() {
   remoteXYDemarrer();                     // application telephone, meme WiFi
   Serial.println("================================================");
 
+  odometrieInit();                        // origine de la carte : ici
   telemetrieDemarrer();
 }
 
@@ -115,6 +119,8 @@ void loop() {
   distanceMettreAJour();
   couleurMettreAJour();
   moteursCalculerVitesses();
+  odometrieMettreAJour();
+  terrainMettreAJour();
   suiviLigneMettreAJour();
   navigationMettreAJour();
   commandesSurveiller();

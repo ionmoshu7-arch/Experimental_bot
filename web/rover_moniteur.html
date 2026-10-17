@@ -107,6 +107,9 @@
   .big { font-size: 28px; font-weight: 700; }
 
   /* moteurs */
+  /* carte */
+  .carte { width: 100%; aspect-ratio: 4 / 3; display: block; background: var(--track); border-radius: 10px; touch-action: none; }
+
   /* camera */
   .cam-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 20px; }
   @media (max-width: 820px) { .cam-grid { grid-template-columns: 1fr; } }
@@ -269,6 +272,37 @@
             <button id="camConnecter" title="Si la camera n'est pas relayee par le rover">Utiliser</button>
           </div>
           <p class="small muted" style="margin:6px 0 0">La video d'un ESP32 ne sert qu'un ecran a la fois : decocher « Afficher la video » la libere pour un autre appareil.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel c12">
+      <h2>Carte de la piece et terrain</h2>
+      <div class="cam-grid">
+        <div>
+          <canvas id="carte" class="carte" aria-label="Carte de la piece : trajet du rover et obstacles"></canvas>
+          <div class="legend" id="legCarte"></div>
+        </div>
+        <div>
+          <div class="evit">
+            <div class="stat"><span class="small muted">Position x / y</span><b class="num" id="crPos">--</b></div>
+            <div class="stat"><span class="small muted">Cap</span><b class="num" id="crCap">--</b></div>
+            <div class="stat"><span class="small muted">Parcouru</span><b class="num" id="crDist">--</b></div>
+            <div class="stat"><span class="small muted">Pente avant / arriere</span><b class="num" id="trTang">--</b></div>
+            <div class="stat"><span class="small muted">Pente gauche / droite</span><b class="num" id="trRoul">--</b></div>
+            <div class="stat"><span class="small muted">Rugosite du sol</span><b class="num" id="trRug">--</b></div>
+            <div class="stat"><span class="small muted">Bosses</span><b class="num" id="trBosses">--</b></div>
+            <div class="stat" title="Les roues tournent mais le rover n'avance pas d'autant (mesure en ligne droite avec un obstacle devant)"><span class="small muted">Glissement des roues</span><b class="num" id="trGliss">--</b></div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px">
+            <button class="cmdl" id="btnOrigine" disabled title="Position actuelle = (0, 0), carte effacee">Nouvelle origine</button>
+            <button class="cmdl" id="btnPente" disabled title="Rover pose sur un sol plat : pente = 0">Pente = 0 ici</button>
+            <button id="btnEffacerCarte">Effacer la carte</button>
+          </div>
+          <p class="small muted" style="margin:8px 0 0">
+            Position : encodeurs (distance) et gyroscope (direction) ; elle derive lentement, surtout si les roues patinent.
+            Points : obstacles vus par les capteurs de distance. Molette ou pincement : zoom.
+          </p>
         </div>
       </div>
     </section>
@@ -663,6 +697,7 @@
     afficherImu(j.imu);
     afficherLigne(j.ligne);
     afficherNav(j.nav, j.imu);
+    afficherCarte(j.pose, j.tof, j.terrain);
     const v = afficherMoteurs(j.mot);
     if (j.net) setTxt($("netInfo"), j.net.ok
       ? `WiFi ${j.net.ip} · ${j.net.rssi} dBm · ${j.net.clients} client(s)`
@@ -1176,6 +1211,142 @@
     minuteurNavV = setTimeout(() => envoyer(`Q ${$("navV").value}\n`), 300);
   });
 
+  // ---------- carte de la piece et terrain ----------
+  // Montage des capteurs de distance sur le rover (mm depuis le centre,
+  // x vers l'avant, y vers la gauche) : a mesurer sur le rover.
+  const MONTAGE = [
+    { x: 120, y: 0, a: 0 },      // avant
+    { x: -120, y: 0, a: 180 },   // arriere
+    { x: 0, y: -80, a: -90 },    // droite
+    { x: 0, y: 80, a: 90 },      // gauche
+  ];
+  const MAX_POINTS = 8000, DISTANCE_MAX_CARTE = 2000;
+  const trajet = [], obstacles = [];         // {x, y} ; {x, y, s}
+  let poseCarte = null, carteSale = true, zoomCarte = 1;
+  const dernierPoint = [null, null, null, null];
+
+  legende("legCarte", [["var(--text)", "trajet"], ...TOF_NOMS.map((n, i) => [SERIE[i], "obstacle " + n])]);
+
+  function versMonde(pose, dx, dy) {
+    const c = pose.cap * Math.PI / 180;
+    return { x: pose.x + dx * Math.cos(c) - dy * Math.sin(c), y: pose.y + dx * Math.sin(c) + dy * Math.cos(c) };
+  }
+
+  function afficherCarte(pose, tofs, terrain) {
+    if (pose) {
+      poseCarte = pose;
+      const der = trajet[trajet.length - 1];
+      if (!der || Math.hypot(pose.x - der.x, pose.y - der.y) > 10) {
+        trajet.push({ x: pose.x, y: pose.y });
+        if (trajet.length > MAX_POINTS) trajet.shift();
+      }
+      (tofs || []).forEach((t, i) => {
+        if (t.s !== "ok" || !(t.d > 0) || t.d > Math.min(DISTANCE_MAX_CARTE, t.p)) return;
+        const m = MONTAGE[i], a = m.a * Math.PI / 180;
+        const p = versMonde(pose, m.x + t.d * Math.cos(a), m.y + t.d * Math.sin(a));
+        const d = dernierPoint[i];
+        if (d && Math.hypot(p.x - d.x, p.y - d.y) < 20) return;   // un point tous les 2 cm
+        dernierPoint[i] = p;
+        obstacles.push({ x: p.x, y: p.y, s: i });
+        if (obstacles.length > MAX_POINTS) obstacles.shift();
+      });
+      setTxt($("crPos"), `${(pose.x / 1000).toFixed(2)} / ${(pose.y / 1000).toFixed(2)} m`);
+      setTxt($("crCap"), fmt(pose.cap) + " °");
+      setTxt($("crDist"), (pose.d / 1000).toFixed(2) + " m");
+      carteSale = true;
+    }
+    if (terrain) {
+      setTxt($("trTang"), fmt(terrain.tang) + " °");
+      setTxt($("trRoul"), fmt(terrain.roul) + " °");
+      setTxt($("trRug"), terrain.rug < 0.05 ? "lisse" : terrain.rug < 0.15 ? "irregulier" : "tres irregulier");
+      $("trRug").title = terrain.rug.toFixed(3) + " g";
+      setTxt($("trBosses"), String(terrain.bosses));
+      setTxt($("trGliss"), terrain.gliss < 0 ? "inconnu" : Math.round(terrain.gliss * 100) + " %");
+      $("trGliss").className = "num" + (terrain.gliss > 0.4 ? " s-err" : "");
+    }
+  }
+
+  function dessinerCarte() {
+    const cv = $("carte"), dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (!w) return;
+    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    // cadrage : tout le trajet et les obstacles, 2 m au minimum
+    let minX = -1000, maxX = 1000, minY = -1000, maxY = 1000;
+    for (const tab of [trajet, obstacles]) {
+      for (const p of tab) {
+        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+      }
+    }
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const echelle = Math.min(w / (maxX - minX), h / (maxY - minY)) * 0.9 * zoomCarte;
+    // x vers la droite de l'ecran, y vers le haut
+    const X = (x) => w / 2 + (x - cx) * echelle, Y = (y) => h / 2 - (y - cy) * echelle;
+
+    // quadrillage tous les 50 cm
+    ctx.strokeStyle = pal.border; ctx.lineWidth = 1; ctx.fillStyle = pal.muted; ctx.font = "10px system-ui";
+    const pas = 500;
+    for (let x = Math.floor((cx - w / 2 / echelle) / pas) * pas; X(x) < w; x += pas) {
+      ctx.beginPath(); ctx.moveTo(X(x), 0); ctx.lineTo(X(x), h); ctx.stroke();
+    }
+    for (let y = Math.floor((cy - h / 2 / echelle) / pas) * pas; Y(y) > 0; y += pas) {
+      ctx.beginPath(); ctx.moveTo(0, Y(y)); ctx.lineTo(w, Y(y)); ctx.stroke();
+    }
+    ctx.fillText("carreaux de 50 cm", 6, h - 6);
+
+    // obstacles
+    for (const p of obstacles) {
+      ctx.fillStyle = SERIE[p.s];
+      ctx.fillRect(X(p.x) - 1.5, Y(p.y) - 1.5, 3, 3);
+    }
+    // trajet
+    ctx.strokeStyle = couleurTexte(); ctx.lineWidth = 2; ctx.beginPath();
+    trajet.forEach((p, i) => i ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y)));
+    ctx.stroke();
+    // origine
+    ctx.strokeStyle = pal.muted; ctx.beginPath(); ctx.arc(X(0), Y(0), 5, 0, 2 * Math.PI); ctx.stroke();
+    // rover : triangle pointe vers l'avant
+    if (poseCarte) {
+      const c = poseCarte.cap * Math.PI / 180;
+      ctx.save();
+      ctx.translate(X(poseCarte.x), Y(poseCarte.y));
+      ctx.rotate(-c);
+      ctx.fillStyle = pal.bad;
+      ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-8, 7); ctx.lineTo(-8, -7); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
+  const couleurTexte = () => getComputedStyle(document.documentElement).getPropertyValue("--text").trim();
+
+  setInterval(() => { if (carteSale) { carteSale = false; dessinerCarte(); } }, 100);
+  window.addEventListener("resize", () => carteSale = true);
+  $("carte").addEventListener("wheel", (e) => {
+    e.preventDefault();
+    zoomCarte = Math.min(20, Math.max(0.2, zoomCarte * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+    carteSale = true;
+  }, { passive: false });
+  let pincement = null;
+  $("carte").addEventListener("touchmove", (e) => {
+    if (e.touches.length !== 2) return;
+    e.preventDefault();
+    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    if (pincement) zoomCarte = Math.min(20, Math.max(0.2, zoomCarte * d / pincement));
+    pincement = d; carteSale = true;
+  }, { passive: false });
+  $("carte").addEventListener("touchend", () => pincement = null);
+
+  function effacerCarte() {
+    trajet.length = 0; obstacles.length = 0; dernierPoint.fill(null); zoomCarte = 1; carteSale = true;
+  }
+  $("btnEffacerCarte").onclick = effacerCarte;
+  $("btnOrigine").onclick = () => { envoyer("O\n"); effacerCarte(); };
+  $("btnPente").onclick = () => envoyer("T\n");
+
   // ---------- camera ----------
   // La page parle directement a la camera (HTTP) ; son adresse arrive par
   // le rover (lignes [CAM]) ou se saisit a la main.
@@ -1276,7 +1447,8 @@
       if (enregistrait && c.recFichier) {
         $("camMessage").innerHTML = `Video enregistree (${mmss(c.recSec)}) : `
           + `<a href="${camBase}/sd?f=${encodeURIComponent(c.recFichier)}">telecharger ${c.recFichier.split("/").pop()}</a>`
-          + " — a lire avec VLC";
+          + " (a lire avec VLC) · "
+          + `<a href="${camBase}/sd?f=${encodeURIComponent(c.recFichier.replace(/\.avi$/, ".jsonl"))}">mesures synchronisees</a>`;
       }
     }
     b.disabled = !c.sd;
@@ -1362,6 +1534,8 @@
         ],
         imu: { cap: capD, gx: .1, gy: -.2, gz, ax: .01, ay: -.02, az: 1, temp: 31.4, biais: -.018 },
         mot: { stby: eff.some(v => v) ? 1 : 0, m },
+        pose: { x: 900 * Math.sin(s / 6), y: 600 * Math.sin(s / 3), cap: capD, d: s * 120 },
+        terrain: { tang: 2 * Math.sin(s / 4), roul: -1.5 * Math.cos(s / 5), rug: 0.04 + 0.03 * Math.abs(Math.sin(s)), bosses: Math.floor(s / 7), gliss: s % 10 > 5 ? 0.15 : -1 },
         nav: { e: s % 20 > 15 ? "DEGAGE_SCAN" : "AVANCE", cible: capD + 10, obst: Math.floor(s / 4),
                col: Math.floor(s / 9), v: 110, ev: "obstacle", rend: s > 1 ? 2.1 : 0,
                ess: s % 20 > 15 ? 1 : 0, essMax: 4 },

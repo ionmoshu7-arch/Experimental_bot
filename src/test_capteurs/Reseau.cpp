@@ -22,6 +22,7 @@ static RappelSimple rappelOta = nullptr;
 // "[CAM]{...}" : son etat est relaye a la page (et au port serie), et
 // son depart n'arrete pas les moteurs.
 static bool estCamera[WEBSOCKETS_SERVER_CLIENT_MAX] = { false };
+static bool cameraEnregistre = false;   // la camera enregistre une video
 
 static void evenementWebSocket(uint8_t client, WStype_t type, uint8_t* donnees, size_t longueur) {
   switch (type) {
@@ -44,6 +45,8 @@ static void evenementWebSocket(uint8_t client, WStype_t type, uint8_t* donnees, 
           estCamera[client] = true;
           Serial.printf("[CAM] camera connectee (%s)\n", webSocket.remoteIP(client).toString().c_str());
         }
+        // la camera enregistre : elle recoit alors 10 trames/s (mesures synchronisees)
+        cameraEnregistre = memmem(donnees, longueur, "\"rec\":1", 7) != nullptr;
         Serial.write(donnees, longueur);          // pour la page connectee par USB
         Serial.println();
         for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++)
@@ -128,12 +131,14 @@ void reseauSurOta(RappelSimple rappel)          { rappelOta = rappel; }
 // trame [DATA] sur 10 (2/s) : a 20/s, son WiFi saturait et la video
 // tombait a moins d'une image par seconde.
 static const unsigned long PERIODE_DATA_CAMERA_MS = 500;
+static const unsigned long PERIODE_DATA_CAMERA_REC_MS = 100;   // camera qui enregistre
 static unsigned long dernierDataCamera = 0;
 
 void reseauDiffuser(const char* texte, size_t longueur) {
   if (webSocket.connectedClients() == 0) return;
   bool estData = longueur >= 6 && !memcmp(texte, "[DATA]", 6);
-  bool pourCamera = !estData || millis() - dernierDataCamera >= PERIODE_DATA_CAMERA_MS;
+  unsigned long periode = cameraEnregistre ? PERIODE_DATA_CAMERA_REC_MS : PERIODE_DATA_CAMERA_MS;
+  bool pourCamera = !estData || millis() - dernierDataCamera >= periode;
   if (estData && pourCamera) dernierDataCamera = millis();
   for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++) {
     if (estCamera[i] && !pourCamera) continue;

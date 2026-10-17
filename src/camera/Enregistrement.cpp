@@ -24,6 +24,9 @@ struct EntreeIndex { uint32_t position, taille; };
 static TaskHandle_t tache = nullptr;
 static volatile bool demandeArret = false, enCours = false;
 static File fichier;
+static File fichierMesures;
+static SemaphoreHandle_t verrouMesures = nullptr;
+static int nbMesures = 0;
 static char nomFichier[32] = "";
 static int prochainNumero = 1, nbVideos = 0;
 static EntreeIndex* tableIndex = nullptr;
@@ -94,6 +97,10 @@ static void finaliser() {
   ecrireA(POS_LONGUEUR, nbImages);
   ecrireA(POS_TAILLE_MOVI, positionEcriture - POS_MOVI);
   fichier.close();
+
+  xSemaphoreTake(verrouMesures, portMAX_DELAY);
+  if (fichierMesures) fichierMesures.close();
+  xSemaphoreGive(verrouMesures);
 }
 
 static void tacheEnregistrement(void*) {
@@ -129,8 +136,8 @@ static void tacheEnregistrement(void*) {
   duree = millis() - debut;
   finaliser();
   nbVideos++;
-  Serial.printf("[VIDEO] %s termine (%s) : %d images, %.1f s\n",
-                nomFichier, raison, nbImages, duree / 1000.0);
+  Serial.printf("[VIDEO] %s termine (%s) : %d images, %.1f s, %d mesures du rover\n",
+                nomFichier, raison, nbImages, duree / 1000.0, nbMesures);
   enCours = false;
   tache = nullptr;
   vTaskDelete(nullptr);
@@ -147,6 +154,7 @@ void enregistrementInit() {
       if (n >= prochainNumero) prochainNumero = n + 1;
     }
   }
+  if (!verrouMesures) verrouMesures = xSemaphoreCreateMutex();
   if (!tableIndex) tableIndex = (EntreeIndex*) ps_malloc(IMAGES_MAX * sizeof(EntreeIndex));
   Serial.printf("[VIDEO] %d video(s) sur la carte\n", nbVideos);
 }
@@ -170,6 +178,17 @@ bool enregistrementDemarrer() {
     return false;
   }
   prochainNumero++;
+
+  // mesures du rover, meme nom que la video en .jsonl
+  char nomMesures[32];
+  strncpy(nomMesures, nomFichier, sizeof(nomMesures));
+  char* ext = strrchr(nomMesures, '.');
+  if (ext) strcpy(ext, ".jsonl");
+  xSemaphoreTake(verrouMesures, portMAX_DELAY);
+  fichierMesures = SD_MMC.open(nomMesures, FILE_WRITE);
+  nbMesures = 0;
+  xSemaphoreGive(verrouMesures);
+
   positionEcriture = TAILLE_ENTETE;
   nbImages = 0;
   tailleMax = 0;
@@ -193,4 +212,18 @@ int enregistrementSecondes() {
 }
 
 const char* enregistrementFichier() { return nomFichier; }
+
+void enregistrementMesure(const uint8_t* json, size_t longueur) {
+  if (!enCours || !verrouMesures) return;
+  xSemaphoreTake(verrouMesures, portMAX_DELAY);
+  if (fichierMesures) {
+    char temps[16];
+    int n = snprintf(temps, sizeof(temps), "%lu\t", millis() - debut);
+    fichierMesures.write((const uint8_t*) temps, n);
+    fichierMesures.write(json, longueur);
+    fichierMesures.write((const uint8_t*) "\n", 1);
+    nbMesures++;
+  }
+  xSemaphoreGive(verrouMesures);
+}
 int enregistrementNbVideos() { return nbVideos; }

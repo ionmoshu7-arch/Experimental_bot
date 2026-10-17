@@ -2,6 +2,8 @@
 
 #include "Gyro.h"
 #include "Moteurs.h"
+#include "Odometrie.h"
+#include "Terrain.h"
 #include "Navigation.h"
 #include "SuiviLigne.h"
 #include "Telemetrie.h"
@@ -64,6 +66,13 @@ static void executerLigne(Lecteur &l) {
     else navigationArreter("[NAV] arret demande");
   } else if (cmd == 'Q' && sscanf(args, "%d", &v[0]) == 1) {
     navigationVitesse(v[0]);
+  } else if (cmd == 'O' && l.lg == 1) {
+    odometrieRemettreAZero();
+    terrainRemettreAZero();
+    journal("[CARTE] nouvelle origine : position (0, 0)");
+  } else if (cmd == 'T' && l.lg == 1) {
+    terrainCalibrer();
+    journal("[TERRAIN] pente remise a zero (sol plat ici)");
   } else if (cmd == 'K' && l.lg == 1) {
     suiviLigneCalibrer();
   } else if (cmd == 'R' && sscanf(args, "%d %d", &v[0], &v[1]) == 2) {
@@ -83,10 +92,11 @@ static void traiterCaractere(Lecteur &l, char ch) {
       arretGeneral();     // la calibration bloque 1,5 s : rien ne doit tourner
       journal("[GYRO] calibration, ne pas bouger le rover");
       gyroCalibrer();
+      odometrieRecalerCap();
       journal("[GYRO] biais Z = %.4f deg/s", gyroBiaisZ());
       return;
     }
-    if (ch == 'z' || ch == 'Z') { gyroRemettreCap(); journal("Cap remis a zero"); return; }
+    if (ch == 'z' || ch == 'Z') { gyroRemettreCap(); odometrieRecalerCap(); journal("Cap remis a zero"); return; }
     if (ch == 's' || ch == 'S') { arretGeneral(); journal("[MOT] arret"); return; }
     if (ch == ' ') return;
   }

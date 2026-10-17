@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <WebSocketsClient.h>
+#include "Enregistrement.h"
 #include "ServeurCamera.h"
 
 static const char* NOM_ROVER = "rover";            // rover.local
@@ -35,7 +36,10 @@ static void evenement(WStype_t type, uint8_t* donnees, size_t longueur) {
       break;
     case WStype_TEXT:
       // etat du rover : garde pour plus tard (incrustation, IA)
-      if (longueur > 6 && !memcmp(donnees, "[DATA]", 6)) derniereTrame = millis();
+      if (longueur > 6 && !memcmp(donnees, "[DATA]", 6)) {
+        derniereTrame = millis();
+        enregistrementMesure(donnees + 6, longueur - 6);   // mesures synchronisees
+      }
       break;
     default:
       break;

@@ -7,6 +7,8 @@
 #include "Gyro.h"
 #include "Moteurs.h"
 #include "Navigation.h"
+#include "Odometrie.h"
+#include "Terrain.h"
 #include "Reseau.h"
 #include "SuiviLigne.h"
 
@@ -58,6 +60,15 @@ static void afficherTexte() {
   Serial.printf("LIGNE     %-11s %s  position %+.2f  noirceur G=%.2f C=%.2f D=%.2f\n",
                 suiviLigneNomEtat(), l.calibre ? "calibre" : "NON CALIBRE",
                 l.position, l.noirceur[0], l.noirceur[1], l.noirceur[2]);
+
+  const Pose &po = odometriePose();
+  const InfoTerrain &te = terrainInfo();
+  Serial.printf("CARTE     x=%.0f y=%.0f mm  cap %.1f deg  parcouru %.2f m\n",
+                po.x, po.y, po.cap, po.distance / 1000);
+  char glissement[8] = "?";
+  if (te.glissement >= 0) snprintf(glissement, sizeof(glissement), "%.0f %%", te.glissement * 100);
+  Serial.printf("TERRAIN   pente av/ar %.1f  g/d %.1f deg  rugosite %.3f g  bosses %d  glissement %s\n",
+                te.tangage, te.roulis, te.rugosite, te.bosses, glissement);
 
   const InfoNav &nv = navigationInfo();
   Serial.printf("NAV       %-11s cap cible %.1f  obstacles %d  collisions %d\n",
@@ -147,6 +158,13 @@ static void envoyerJson() {
           "\"rend\":%.2f,\"ess\":%d,\"essMax\":%d}",
           navigationNomEtat(), nv.capCible, nv.obstacles, nv.collisions, nv.vitesse,
           nv.evenement, nv.rendement, nv.essaiDegagement, nv.maxEssais);
+
+  const Pose &po = odometriePose();
+  ajouter(",\"pose\":{\"x\":%.0f,\"y\":%.0f,\"cap\":%.1f,\"d\":%.0f}",
+          po.x, po.y, po.cap, po.distance);
+  const InfoTerrain &te = terrainInfo();
+  ajouter(",\"terrain\":{\"tang\":%.1f,\"roul\":%.1f,\"rug\":%.3f,\"bosses\":%d,\"gliss\":%.2f}",
+          te.tangage, te.roulis, te.rugosite, te.bosses, te.glissement);
 
   ajouter(",\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d}}",
           reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauNbClients());

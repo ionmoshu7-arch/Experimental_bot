@@ -105,8 +105,11 @@ static esp_err_t lireFichier(httpd_req_t* req) {
   if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
   autoriserOrigines(req);
   bool video = !strncmp(chemin, "/videos/", 8);
-  httpd_resp_set_type(req, video ? "video/x-msvideo" : "image/jpeg");
-  if (video) {   // une video se telecharge : le navigateur ne lit pas l'AVI
+  const char* ext = strrchr(chemin, '.');
+  bool mesures = ext && !strcmp(ext, ".jsonl");
+  httpd_resp_set_type(req, mesures ? "text/plain; charset=utf-8"
+                         : video ? "video/x-msvideo" : "image/jpeg");
+  if (video) {   // video et mesures se telechargent (le navigateur ne lit pas l'AVI)
     char dispo[64];
     snprintf(dispo, sizeof(dispo), "attachment; filename=%s", strrchr(chemin, '/') + 1);
     httpd_resp_set_hdr(req, "Content-Disposition", dispo);
