@@ -4,6 +4,7 @@
 #include <FS.h>
 #include <SD_MMC.h>
 #include "esp_http_server.h"
+#include <Update.h>
 #include "Camera.h"
 #include "Enregistrement.h"
 #include "LiaisonRover.h"
@@ -15,6 +16,7 @@ static const char* SEPARATEUR = "\r\n--" LIMITE "\r\n";
 static const char* ENTETE_IMAGE = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
 static httpd_handle_t serveurHttp = nullptr, serveurFlux = nullptr;
+static const char* motDePasseMaj = nullptr;
 static volatile int nbFlux = 0;
 
 int serveurNbFlux() { return nbFlux; }
@@ -26,14 +28,14 @@ void etatCameraJson(char* buf, size_t taille) {
            "\"res\":\"%s\",\"qualite\":%d,\"vflip\":%d,\"miroir\":%d,\"rotation\":%d,\"ips\":%.1f,"
            "\"ecrans\":%d,\"sd\":%d,\"photos\":%d,\"libreMo\":%u,\"rssi\":%d,"
            "\"rover\":%d,\"psramLibreKo\":%u,\"rec\":%d,\"recSec\":%d,\"recMax\":%d,"
-           "\"recFichier\":\"%s\",\"videos\":%d}",
+           "\"recFichier\":\"%s\",\"videos\":%d,\"version\":\"%s %s\"}",
            ip.c_str(), ip.c_str(), PORT_FLUX, cameraModele(), cameraNomResolution(),
            cameraQualiteActuelle(), cameraRetourneeV(), cameraMiroir(), cameraRotationActuelle(),
            cameraImagesParSeconde(), nbFlux, stockagePresent(), stockageNbPhotos(),
            stockageLibreMo(), WiFi.RSSI(), liaisonRoverConnectee(),
            (unsigned) (ESP.getFreePsram() / 1024), enregistrementEnCours(),
            enregistrementSecondes(), DUREE_MAX_S, enregistrementFichier(),
-           enregistrementNbVideos());
+           enregistrementNbVideos(), __DATE__, __TIME__);
 }
 
 static void autoriserOrigines(httpd_req_t* req) {
@@ -182,7 +184,47 @@ static esp_err_t flux(httpd_req_t* req) {
   return res;
 }
 
-void serveurCameraDemarrer() {
+// ---------- mise a jour du programme par HTTP (POST /maj) ----------
+// Le PC envoie le firmware en POST brut, mot de passe dans X-Mot-De-Passe.
+static esp_err_t miseAJour(httpd_req_t* req) {
+  char mdp[64] = "";
+  httpd_req_get_hdr_value_str(req, "X-Mot-De-Passe", mdp, sizeof(mdp));
+  if (!motDePasseMaj || strcmp(mdp, motDePasseMaj) != 0) {
+    httpd_resp_set_status(req, "403 Forbidden");
+    return httpd_resp_sendstr(req, "mot de passe incorrect");
+  }
+  enregistrementArreter();
+  Serial.printf("[MAJ] reception d'un nouveau programme (%u octets)...\n",
+                (unsigned) req->content_len);
+  if (!Update.begin(req->content_len)) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  const size_t TAILLE_TAMPON = 4096;
+  uint8_t* tampon = (uint8_t*) malloc(TAILLE_TAMPON);
+  if (!tampon) { Update.abort(); httpd_resp_send_500(req); return ESP_FAIL; }
+  size_t reste = req->content_len;
+  while (reste > 0) {
+    int n = httpd_req_recv(req, (char*) tampon, min(reste, TAILLE_TAMPON));
+    if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;
+    if (n <= 0 || Update.write(tampon, n) != (size_t) n) break;
+    reste -= n;
+  }
+  free(tampon);
+  if (reste > 0 || !Update.end(true)) {
+    Update.abort();
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, (String("echec : ") + Update.errorString()).c_str());
+  }
+  httpd_resp_sendstr(req, "OK, redemarrage");
+  Serial.println("[MAJ] OK, redemarrage");
+  delay(500);
+  ESP.restart();
+  return ESP_OK;
+}
+
+void serveurCameraDemarrer(const char* motDePasse) {
+  motDePasseMaj = motDePasse;
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.server_port = PORT_HTTP;
   cfg.ctrl_port = 32768;
@@ -196,6 +238,7 @@ void serveurCameraDemarrer() {
       { "/sd",      HTTP_GET, lireFichier, nullptr },
       { "/status",  HTTP_GET, status,      nullptr },
       { "/control", HTTP_GET, controle,    nullptr },
+      { "/maj",     HTTP_POST, miseAJour,  nullptr },
     };
     for (auto &p : pages) httpd_register_uri_handler(serveurHttp, &p);
   }

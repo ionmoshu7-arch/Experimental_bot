@@ -166,8 +166,10 @@ static void envoyerJson() {
   ajouter(",\"terrain\":{\"tang\":%.1f,\"roul\":%.1f,\"rug\":%.3f,\"bosses\":%d,\"gliss\":%.2f}",
           te.tangage, te.roulis, te.rugosite, te.bosses, te.glissement);
 
-  ajouter(",\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d}}",
-          reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauNbClients());
+  // version = date de compilation : montre qu'une mise a jour a pris
+  ajouter(",\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d,\"version\":\"%s %s\"}}",
+          reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauNbClients(),
+          __DATE__, __TIME__);
 
   Serial.println(trame);
   reseauDiffuser(trame, lgTrame);

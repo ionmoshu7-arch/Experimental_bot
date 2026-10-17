@@ -12,10 +12,13 @@
 #pragma once
 
 #include <Arduino.h>
+#include <IPAddress.h>
 
 void liaisonRoverDemarrer();
 void liaisonRoverMettreAJour();     // a appeler a chaque tour de boucle
 bool liaisonRoverConnectee();
 void liaisonRoverActiver(bool active);      // coupe / retablit la liaison
+bool liaisonRoverEnvoyer(const char* texte); // commande vers le rover (false : pas connecte)
+IPAddress liaisonRoverIp();                 // 0.0.0.0 tant qu'il n'est pas trouve
 bool liaisonRoverActive();
 unsigned long liaisonRoverDerniereTrame();   // millis() de la derniere [DATA]

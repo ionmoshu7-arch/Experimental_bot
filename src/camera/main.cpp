@@ -19,6 +19,8 @@
  *   Stockage.cpp       carte TF : photos
  *   Enregistrement.cpp video AVI a la demande sur la carte TF
  *   LiaisonRover.cpp   synchronisation avec le rover
+ *   Pont.cpp           console des 2 cartes sur le cable USB (460800 bauds)
+ *   RelaisMaj.cpp      programmer le rover a travers la camera
  * Identifiants WiFi : include/secrets.h (non versionne), comme le rover.
  * ------------------------------------------------------------
  */
@@ -31,6 +33,8 @@
 #include "Camera.h"
 #include "Enregistrement.h"
 #include "LiaisonRover.h"
+#include "Pont.h"
+#include "RelaisMaj.h"
 #include "ServeurCamera.h"
 #include "Stockage.h"
 
@@ -55,11 +59,13 @@ static void demarrerOta() {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.setRxBufferSize(8192);               // blocs du programme du rover
+  Serial.begin(VITESSE_SERIE_CAMERA);
   delay(500);
   Serial.println();
   Serial.println("================================================");
   Serial.println("   CAMERA DU ROVER - ESP32-S3 N16R8 + OV2640");
+  Serial.println("   version du " __DATE__ " " __TIME__);
   Serial.println("================================================");
   Serial.printf("  PSRAM : %u Ko   flash : %u Mo\n",
                 (unsigned) (ESP.getPsramSize() / 1024), (unsigned) (ESP.getFlashChipSize() >> 20));
@@ -83,8 +89,10 @@ void setup() {
   }
   Serial.println();
 
-  serveurCameraDemarrer();
+  serveurCameraDemarrer(OTA_MOT_DE_PASSE);
   liaisonRoverDemarrer();
+  relaisMajInit(OTA_MOT_DE_PASSE);
+  pontDemarrer();
 }
 
 void loop() {
@@ -103,6 +111,7 @@ void loop() {
 
   if (otaDemarre) ArduinoOTA.handle();
   liaisonRoverMettreAJour();
+  pontMettreAJour();
 
   static unsigned long dernierLog = 0;
   if (millis() - dernierLog >= 5000) {

@@ -72,6 +72,7 @@ void setup() {
   Serial.println();
   Serial.println("================================================");
   Serial.println("   TEST CAPTEURS + MOTEURS");
+  Serial.println("   version du " __DATE__ " " __TIME__);
   Serial.println("   commandes : c = calibrer, z = cap a 0, s = stop moteurs");
   Serial.println("================================================");
 

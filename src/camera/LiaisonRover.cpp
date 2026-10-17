@@ -4,6 +4,7 @@
 #include <ESPmDNS.h>
 #include <WebSocketsClient.h>
 #include "Enregistrement.h"
+#include "Pont.h"
 #include "ServeurCamera.h"
 
 static const char* NOM_ROVER = "rover";            // rover.local
@@ -40,6 +41,7 @@ static void evenement(WStype_t type, uint8_t* donnees, size_t longueur) {
         derniereTrame = millis();
         enregistrementMesure(donnees + 6, longueur - 6);   // mesures synchronisees
       }
+      pontMessageRover(donnees, longueur);                 // console sur le cable USB
       break;
     default:
       break;
@@ -108,4 +110,11 @@ void liaisonRoverMettreAJour() {
 }
 
 bool liaisonRoverConnectee() { return connectee; }
+
+bool liaisonRoverEnvoyer(const char* texte) {
+  if (!connectee) return false;
+  return ws.sendTXT(texte);
+}
+
+IPAddress liaisonRoverIp() { return ipRover; }
 unsigned long liaisonRoverDerniereTrame() { return derniereTrame; }
