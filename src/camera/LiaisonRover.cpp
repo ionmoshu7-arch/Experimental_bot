@@ -19,7 +19,7 @@ static IPAddress ipRover;
 static unsigned long derniereRecherche = 0, dernierEtat = 0, derniereTrame = 0;
 
 static void envoyerEtat() {
-  char json[512];
+  char json[640];
   etatCameraJson(json, sizeof(json));
   String message = String("[CAM]") + json;
   ws.sendTXT(message);

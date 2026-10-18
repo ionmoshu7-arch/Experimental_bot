@@ -4,10 +4,18 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "IA rover : voir (detections, aucun ordre moteur)",
+      "label": "IA rover : voir (fenetre video + cadres dans la page)",
       "type": "process",
       "command": "${env:LOCALAPPDATA}\\RoverIA\\venv\\Scripts\\python.exe",
       "args": ["${workspaceFolder}\\ia\\rover_ia.py", "--mode", "voir"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "IA rover : service sans fenetre (reglee depuis la page)",
+      "type": "process",
+      "command": "${env:LOCALAPPDATA}\\RoverIA\\venv\\Scripts\\python.exe",
+      "args": ["${workspaceFolder}\\ia\\rover_ia.py", "--service"],
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated" }
     },

@@ -17,7 +17,7 @@ static const char* TYPE_FLUX = "multipart/x-mixed-replace;boundary=" LIMITE;
 static const char* SEPARATEUR = "\r\n--" LIMITE "\r\n";
 static const char* ENTETE_IMAGE = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
-static httpd_handle_t serveurHttp = nullptr, serveurFlux = nullptr;
+static httpd_handle_t serveurHttp = nullptr, serveurFlux = nullptr, serveurFluxIA = nullptr;
 static const char* motDePasseMaj = nullptr;
 static volatile int nbFlux = 0;
 
@@ -26,12 +26,13 @@ int serveurNbFlux() { return nbFlux; }
 void etatCameraJson(char* buf, size_t taille) {
   String ip = WiFi.localIP().toString();
   snprintf(buf, taille,
-           "{\"ip\":\"%s\",\"flux\":\"http://%s:%u/stream\",\"modele\":\"%s\","
+           "{\"ip\":\"%s\",\"flux\":\"http://%s:%u/stream\",\"fluxIA\":\"http://%s:%u/stream\","
+           "\"modele\":\"%s\","
            "\"res\":\"%s\",\"qualite\":%d,\"vflip\":%d,\"miroir\":%d,\"rotation\":%d,\"ips\":%.1f,"
            "\"ecrans\":%d,\"sd\":%d,\"photos\":%d,\"libreMo\":%u,\"rssi\":%d,"
            "\"rover\":%d,\"psramLibreKo\":%u,\"rec\":%d,\"recSec\":%d,\"recMax\":%d,"
            "\"recFichier\":\"%s\",\"videos\":%d,\"version\":\"%s %s\"}",
-           ip.c_str(), ip.c_str(), PORT_FLUX, cameraModele(), cameraNomResolution(),
+           ip.c_str(), ip.c_str(), PORT_FLUX, ip.c_str(), PORT_FLUX_IA, cameraModele(), cameraNomResolution(),
            cameraQualiteActuelle(), cameraRetourneeV(), cameraMiroir(), cameraRotationActuelle(),
            cameraImagesParSeconde(), nbFlux, stockagePresent(), stockageNbPhotos(),
            stockageLibreMo(), WiFi.RSSI(), liaisonRoverConnectee(),
@@ -135,7 +136,7 @@ static esp_err_t lireFichier(httpd_req_t* req) {
 
 // ---------- etat ----------
 static esp_err_t status(httpd_req_t* req) {
-  char json[512];
+  char json[640];
   etatCameraJson(json, sizeof(json));
   return envoyerJson(req, json);
 }
@@ -172,17 +173,30 @@ static esp_err_t flux(httpd_req_t* req) {
   nbFlux++;
   Serial.println("[CAM] un ecran regarde la video");
   char entete[64];
+  // L'image est copiee puis le tampon de la camera rendu aussitot : un ecran
+  // lent (WiFi) ne bloque ainsi ni l'autre flux (page / IA) ni l'enregistrement.
+  uint8_t* copie = nullptr;
+  size_t tailleCopie = 0;
   while (true) {
     camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) { res = ESP_FAIL; break; }
-    size_t lg = snprintf(entete, sizeof(entete), ENTETE_IMAGE, (unsigned) fb->len);
+    size_t lgImage = fb->len;
+    if (lgImage > tailleCopie) {
+      free(copie);
+      tailleCopie = lgImage + 16384;
+      copie = (uint8_t*) ps_malloc(tailleCopie);
+    }
+    if (copie) memcpy(copie, fb->buf, lgImage);
+    esp_camera_fb_return(fb);
+    if (!copie) { res = ESP_ERR_NO_MEM; break; }
+    size_t lg = snprintf(entete, sizeof(entete), ENTETE_IMAGE, (unsigned) lgImage);
     res = httpd_resp_send_chunk(req, SEPARATEUR, strlen(SEPARATEUR));
     if (res == ESP_OK) res = httpd_resp_send_chunk(req, entete, lg);
-    if (res == ESP_OK) res = httpd_resp_send_chunk(req, (const char*) fb->buf, fb->len);
-    esp_camera_fb_return(fb);
+    if (res == ESP_OK) res = httpd_resp_send_chunk(req, (const char*) copie, lgImage);
     if (res != ESP_OK) break;     // ecran ferme
     cameraCompterImage();
   }
+  free(copie);
   nbFlux--;
   Serial.println("[CAM] ecran video ferme");
   return res;
@@ -281,12 +295,18 @@ void serveurCameraDemarrer(const char* motDePasse) {
     for (auto &p : pages) httpd_register_uri_handler(serveurHttp, &p);
   }
 
+  // deux serveurs video : la page (81) et l'IA du PC (82)
+  httpd_uri_t uriFlux = { "/stream", HTTP_GET, flux, nullptr };
   httpd_config_t cfgFlux = HTTPD_DEFAULT_CONFIG();
   cfgFlux.server_port = PORT_FLUX;
   cfgFlux.ctrl_port = 32769;
-  if (httpd_start(&serveurFlux, &cfgFlux) == ESP_OK) {
-    httpd_uri_t uriFlux = { "/stream", HTTP_GET, flux, nullptr };
+  cfgFlux.max_open_sockets = 3;            // 16 sockets en tout sur la carte
+  if (httpd_start(&serveurFlux, &cfgFlux) == ESP_OK)
     httpd_register_uri_handler(serveurFlux, &uriFlux);
-  }
-  Serial.printf("[CAM] serveurs : http %u, video %u\n", PORT_HTTP, PORT_FLUX);
+  cfgFlux.server_port = PORT_FLUX_IA;
+  cfgFlux.ctrl_port = 32770;
+  if (httpd_start(&serveurFluxIA, &cfgFlux) == ESP_OK)
+    httpd_register_uri_handler(serveurFluxIA, &uriFlux);
+  Serial.printf("[CAM] serveurs : http %u, video %u (page) et %u (IA)\n",
+                PORT_HTTP, PORT_FLUX, PORT_FLUX_IA);
 }

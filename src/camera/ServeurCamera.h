@@ -25,6 +25,9 @@
 
 constexpr uint16_t PORT_HTTP = 80;
 constexpr uint16_t PORT_FLUX = 81;
+// 2e flux video, pour l'IA du PC : chaque serveur ne sert qu'un ecran a la
+// fois (la boucle MJPEG occupe sa tache), la page garde ainsi le port 81.
+constexpr uint16_t PORT_FLUX_IA = 82;
 
 void serveurCameraDemarrer(const char* motDePasseMaj);   // mot de passe de /maj
 int serveurNbFlux();                       // ecrans qui regardent la video

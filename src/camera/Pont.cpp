@@ -108,7 +108,7 @@ void pontCommandeCamera(const char* c) {
     journalListeJson(liste);
     Serial.printf("[CAM] journal en cours : %s\n[CAM] fichiers : %s\n", journalFichierCourant(), liste.c_str());
   } else if (!strcmp(c, "etat")) {
-    char json[512];
+    char json[640];
     etatCameraJson(json, sizeof(json));
     Serial.print("[CAM] ");
     Serial.println(json);
