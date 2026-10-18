@@ -190,6 +190,10 @@ void reseauDemarrer(const char* ssid, const char* motDePasse,
 
   webSocket.begin();
   webSocket.onEvent(evenementWebSocket);
+  // Ping toutes les 2 s : un client qui ne repond plus (telephone en veille,
+  // onglet ou IA tues) est deconnecte apres environ 8 s. Sans cela, sa place
+  // restait prise et, les places pleines, plus personne ne pouvait se connecter.
+  webSocket.enableHeartbeat(2000, 3000, 2);
 
   // Attente courte : sans reseau, le rover demarre quand meme
   Serial.printf("[WIFI] connexion a \"%s\"", ssid);
