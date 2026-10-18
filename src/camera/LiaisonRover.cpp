@@ -4,6 +4,7 @@
 #include <ESPmDNS.h>
 #include <WebSocketsClient.h>
 #include "Enregistrement.h"
+#include "Journal.h"
 #include "Pont.h"
 #include "ServeurCamera.h"
 
@@ -41,6 +42,7 @@ static void evenement(WStype_t type, uint8_t* donnees, size_t longueur) {
         derniereTrame = millis();
         enregistrementMesure(donnees + 6, longueur - 6);   // mesures synchronisees
       }
+      journalMessage(donnees, longueur);                   // journal de navigation
       pontMessageRover(donnees, longueur);                 // console sur le cable USB
       break;
     default:

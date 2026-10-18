@@ -13,6 +13,8 @@
  *   http://camera.local/sd?f=/videos/VID_0001.avi   telecharger une video
  *   http://camera.local:81/stream video MJPEG (un seul ecran a la fois)
  *   POST http://camera.local/maj   nouveau programme (en-tete X-Mot-De-Passe)
+ *   http://camera.local/journaux   liste du journal de navigation (JSON)
+ *   http://camera.local/vider?confirmer=oui   efface photos, videos et journal
  *
  * Toutes les reponses autorisent les autres origines (CORS) : la page
  * du rover (rover.local) peut piloter la camera directement.
@@ -27,3 +29,4 @@ constexpr uint16_t PORT_FLUX = 81;
 void serveurCameraDemarrer(const char* motDePasseMaj);   // mot de passe de /maj
 int serveurNbFlux();                       // ecrans qui regardent la video
 void etatCameraJson(char* buf, size_t taille);
+int viderCarte();                          // photos, videos, journal ; -1 si occupee

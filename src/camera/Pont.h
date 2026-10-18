@@ -7,7 +7,7 @@
  *   - une ligne tapee est envoyee au rover : s, c, z, O, T, L 1, N 1, A ...
  *   - une ligne qui commence par "cam " est pour la camera :
  *       cam photo | cam video 1 / 0 | cam res VGA | cam etat
- *       cam liaison 1 / 0 | cam aide
+ *       cam liaison 1 / 0 | cam journal | cam vider oui | cam aide
  *   - "!MAJROVER ..." : programme du rover envoye par le PC (RelaisMaj.h)
  */
 #pragma once

@@ -7,6 +7,8 @@
 #include <Update.h>
 #include "Camera.h"
 #include "Enregistrement.h"
+#include "Journal.h"
+#include "RelaisMaj.h"
 #include "LiaisonRover.h"
 #include "Stockage.h"
 
@@ -98,7 +100,8 @@ static esp_err_t lireFichier(httpd_req_t* req) {
   char requete[96], chemin[64];
   if (httpd_req_get_url_query_str(req, requete, sizeof(requete)) != ESP_OK ||
       httpd_query_key_value(requete, "f", chemin, sizeof(chemin)) != ESP_OK ||
-      (strncmp(chemin, "/photos/", 8) != 0 && strncmp(chemin, "/videos/", 8) != 0) ||
+      (strncmp(chemin, "/photos/", 8) != 0 && strncmp(chemin, "/videos/", 8) != 0 &&
+       strncmp(chemin, "/journal/", 9) != 0) ||
       strstr(chemin, "..")) {
     httpd_resp_send_404(req);
     return ESP_FAIL;
@@ -106,7 +109,8 @@ static esp_err_t lireFichier(httpd_req_t* req) {
   File f = SD_MMC.open(chemin);
   if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
   autoriserOrigines(req);
-  bool video = !strncmp(chemin, "/videos/", 8);
+  // tout ce qui n'est pas une photo se telecharge (video AVI, mesures, journal)
+  bool video = strncmp(chemin, "/photos/", 8) != 0;
   const char* ext = strrchr(chemin, '.');
   bool mesures = ext && !strcmp(ext, ".jsonl");
   httpd_resp_set_type(req, mesures ? "text/plain; charset=utf-8"
@@ -184,6 +188,38 @@ static esp_err_t flux(httpd_req_t* req) {
   return res;
 }
 
+// ---------- journal de navigation ----------
+static esp_err_t journaux(httpd_req_t* req) {
+  String liste;
+  journalListeJson(liste);
+  String json = String("{\"courant\":\"") + journalFichierCourant() + "\",\"fichiers\":" + liste + "}";
+  return envoyerJson(req, json.c_str());
+}
+
+// ---------- vider la carte TF : /vider?confirmer=oui ----------
+int viderCarte() {
+  if (enregistrementEnCours() || relaisMajEnCours()) return -1;
+  int n = stockageViderPhotos();
+  n += stockageViderDossier("/videos");
+  enregistrementInit();                      // recompte : 0 video, numerotation a 1
+  n += journalVider();
+  Serial.printf("[SD] carte videe : %d fichier(s) efface(s)\n", n);
+  return n;
+}
+
+static esp_err_t vider(httpd_req_t* req) {
+  char requete[64], confirmer[8] = "";
+  if (httpd_req_get_url_query_str(req, requete, sizeof(requete)) == ESP_OK)
+    httpd_query_key_value(requete, "confirmer", confirmer, sizeof(confirmer));
+  if (strcmp(confirmer, "oui") != 0)
+    return envoyerJson(req, "{\"ok\":0,\"erreur\":\"ajouter ?confirmer=oui\"}");
+  int n = viderCarte();
+  if (n < 0) return envoyerJson(req, "{\"ok\":0,\"erreur\":\"enregistrement ou mise a jour en cours\"}");
+  char json[64];
+  snprintf(json, sizeof(json), "{\"ok\":1,\"effaces\":%d}", n);
+  return envoyerJson(req, json);
+}
+
 // ---------- mise a jour du programme par HTTP (POST /maj) ----------
 // Le PC envoie le firmware en POST brut, mot de passe dans X-Mot-De-Passe.
 static esp_err_t miseAJour(httpd_req_t* req) {
@@ -228,7 +264,7 @@ void serveurCameraDemarrer(const char* motDePasse) {
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.server_port = PORT_HTTP;
   cfg.ctrl_port = 32768;
-  cfg.max_uri_handlers = 8;
+  cfg.max_uri_handlers = 12;
   cfg.stack_size = 8192;
   if (httpd_start(&serveurHttp, &cfg) == ESP_OK) {
     httpd_uri_t pages[] = {
@@ -239,6 +275,8 @@ void serveurCameraDemarrer(const char* motDePasse) {
       { "/status",  HTTP_GET, status,      nullptr },
       { "/control", HTTP_GET, controle,    nullptr },
       { "/maj",     HTTP_POST, miseAJour,  nullptr },
+      { "/journaux", HTTP_GET, journaux,   nullptr },
+      { "/vider",   HTTP_GET, vider,       nullptr },
     };
     for (auto &p : pages) httpd_register_uri_handler(serveurHttp, &p);
   }

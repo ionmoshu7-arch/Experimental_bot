@@ -23,7 +23,7 @@
 constexpr int DUREE_MAX_S = 600;           // 10 minutes au plus par fichier
 constexpr int IMAGES_PAR_SECONDE_MAX = 10;
 
-void enregistrementInit();                 // apres stockageInit()
+void enregistrementInit();                 // apres stockageInit() ; recompte les videos
 bool enregistrementDemarrer();             // false : pas de carte, deja en cours...
 void enregistrementArreter();
 bool enregistrementEnCours();

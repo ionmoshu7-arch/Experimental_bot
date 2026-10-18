@@ -3,6 +3,7 @@
 #include "esp_camera.h"
 #include "Camera.h"
 #include "Enregistrement.h"
+#include "Journal.h"
 #include "LiaisonRover.h"
 #include "RelaisMaj.h"
 #include "ServeurCamera.h"
@@ -97,6 +98,15 @@ static void commandeCamera(const char* c) {
     Serial.println(cameraResolution(c + 4) ? "[CAM] resolution changee" : "[CAM] resolution refusee");
   } else if (!strncmp(c, "liaison ", 8)) {
     liaisonRoverActiver(atoi(c + 8));
+  } else if (!strncmp(c, "vider", 5)) {
+    if (strcmp(c, "vider oui") != 0) { Serial.println("[CAM] pour tout effacer : cam vider oui"); return; }
+    int n = viderCarte();
+    if (n < 0) Serial.println("[CAM] impossible : enregistrement ou mise a jour en cours");
+    else Serial.printf("[CAM] carte videe : %d fichier(s) efface(s)\n", n);
+  } else if (!strcmp(c, "journal")) {
+    String liste;
+    journalListeJson(liste);
+    Serial.printf("[CAM] journal en cours : %s\n[CAM] fichiers : %s\n", journalFichierCourant(), liste.c_str());
   } else if (!strcmp(c, "etat")) {
     char json[512];
     etatCameraJson(json, sizeof(json));
@@ -104,7 +114,7 @@ static void commandeCamera(const char* c) {
     Serial.println(json);
   } else {
     Serial.println("[CAM] commandes : cam photo | cam video 1/0 | cam res QVGA..UXGA | "
-                   "cam etat | cam liaison 1/0");
+                   "cam etat | cam liaison 1/0 | cam journal | cam vider oui");
     Serial.println("[PONT] autres lignes -> rover : s stop, c calibrer, z cap 0, O origine, "
                    "T pente 0, L 1/0 ligne, N 1/0 navigation");
   }

@@ -145,6 +145,8 @@ static void tacheEnregistrement(void*) {
 
 void enregistrementInit() {
   if (!stockagePresent()) return;
+  nbVideos = 0;                       // (re)compte : aussi apres un effacement
+  prochainNumero = 1;
   SD_MMC.mkdir(DOSSIER_VIDEOS);
   File dossier = SD_MMC.open(DOSSIER_VIDEOS);
   for (File f = dossier.openNextFile(); f; f = dossier.openNextFile()) {

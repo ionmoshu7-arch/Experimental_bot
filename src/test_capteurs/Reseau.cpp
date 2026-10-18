@@ -180,7 +180,7 @@ void reseauSurOta(RappelSimple rappel)          { rappelOta = rappel; }
 // Les pages recoivent tout (20 trames/s). La camera ne recoit qu'une
 // trame [DATA] sur 10 (2/s) : a 20/s, son WiFi saturait et la video
 // tombait a moins d'une image par seconde.
-static const unsigned long PERIODE_DATA_CAMERA_MS = 500;
+static const unsigned long PERIODE_DATA_CAMERA_MS = 200;   // 5/s : journal de navigation
 static const unsigned long PERIODE_DATA_CAMERA_REC_MS = 100;   // camera qui enregistre
 static unsigned long dernierDataCamera = 0;
 

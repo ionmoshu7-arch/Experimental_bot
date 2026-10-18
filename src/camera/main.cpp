@@ -18,6 +18,7 @@
  *   ServeurCamera.cpp  serveurs HTTP : video, photo, reglages, etat
  *   Stockage.cpp       carte TF : photos
  *   Enregistrement.cpp video AVI a la demande sur la carte TF
+ *   Journal.cpp        journal de navigation du rover (fichiers tournants)
  *   LiaisonRover.cpp   synchronisation avec le rover
  *   Pont.cpp           console des 2 cartes sur le cable USB (460800 bauds)
  *   RelaisMaj.cpp      programmer le rover a travers la camera
@@ -32,6 +33,7 @@
 
 #include "Camera.h"
 #include "Enregistrement.h"
+#include "Journal.h"
 #include "LiaisonRover.h"
 #include "Pont.h"
 #include "RelaisMaj.h"
@@ -75,6 +77,7 @@ void setup() {
   Serial.printf("  Camera : %s\n", cam ? cameraModele() : "ERREUR (nappe bien enfoncee ?)");
   stockageInit();
   enregistrementInit();
+  journalInit();
 
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(NOM_HOTE);
@@ -112,6 +115,7 @@ void loop() {
   if (otaDemarre) ArduinoOTA.handle();
   liaisonRoverMettreAJour();
   pontMettreAJour();
+  journalMettreAJour();
 
   static unsigned long dernierLog = 0;
   if (millis() - dernierLog >= 5000) {

@@ -2,6 +2,7 @@
 
 #include <FS.h>
 #include <SD_MMC.h>
+#include <vector>
 
 // Brochage TF de la carte (Freenove / Diymore ESP32-S3-WROOM CAM)
 static const int SD_CLK = 39, SD_CMD = 38, SD_D0 = 40;
@@ -41,6 +42,27 @@ int stockageNbPhotos() { return nbPhotos; }
 uint32_t stockageLibreMo() {
   if (!present) return 0;
   return (SD_MMC.totalBytes() - SD_MMC.usedBytes()) / (1024 * 1024);
+}
+
+int stockageViderDossier(const char* dossier) {
+  if (!present) return 0;
+  // noms d'abord, puis effacement (ne pas effacer pendant le parcours)
+  std::vector<String> chemins;
+  File d = SD_MMC.open(dossier);
+  if (!d) return 0;
+  for (File f = d.openNextFile(); f; f = d.openNextFile())
+    if (!f.isDirectory()) chemins.push_back(String(dossier) + "/" + f.name());
+  d.close();
+  int n = 0;
+  for (auto &c : chemins) n += SD_MMC.remove(c) ? 1 : 0;
+  return n;
+}
+
+int stockageViderPhotos() {
+  int n = stockageViderDossier(DOSSIER_PHOTOS);
+  nbPhotos = 0;
+  prochainNumero = 1;
+  return n;
 }
 
 String stockageEnregistrerPhoto(const uint8_t* jpeg, size_t taille) {
