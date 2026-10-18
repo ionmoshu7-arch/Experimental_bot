@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture Rover</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --paper: #ffffff; --text: #1d2330; --muted: #6b7280;
+    --border: #d5d9e0; --fill: #f8fafc; --plan: #94a3b8;
+    --ws: #2563eb; --video: #7c3aed; --usb: #4b5563; --i2c: #0891b2;
+    --motor: #111827; --bad: #dc2626; --ok: #16a34a; --rover: #2563eb; --cam: #7c3aed; --pc: #d97706;
+    --accent: #2563eb;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --paper: #161b22; --text: #e6edf3; --muted: #8b949e;
+      --border: #3a414b; --fill: #1c222b; --plan: #6e7681;
+      --ws: #60a5fa; --video: #a78bfa; --usb: #9ca3af; --i2c: #22d3ee;
+      --motor: #e5e7eb; --bad: #f87171; --ok: #4ade80; --rover: #60a5fa; --cam: #a78bfa; --pc: #fbbf24;
+      --accent: #58a6ff;
+      color-scheme: dark;
+    }
+  }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1760px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+  .liens { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin: 0 0 12px; }
+  .liens b { color: var(--text); }
+  button {
+    font: inherit; color: inherit; background: var(--paper); cursor: pointer;
+    border: 1px solid var(--border); border-radius: 8px; padding: 5px 12px; margin-left: auto;
+  }
+  .feuille {
+    background: var(--paper); border: 1px solid var(--border); border-radius: 12px;
+    overflow-x: auto; padding: 8px;
+  }
+  svg { display: block; min-width: 1200px; width: 100%; height: auto; }
+  svg text { fill: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .sources { margin-top: 12px; font-size: 13px; }
+  @media print {
+    body { background: #fff; } button, .liens { display: none; }
+    .feuille { border: none; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="liens" aria-label="Documents du rover">
+    <a data-doc="schema_rover.html">Schema electrique</a>
+    <b>Architecture</b>
+    <a href="http://rover.local/" target="_blank" rel="noopener">Page de commande (http://rover.local/)</a>
+    <a href="http://camera.local/" target="_blank" rel="noopener">Camera (http://camera.local/)</a>
+  </nav>
+  <header>
+    <h1>Architecture de fonctionnement du rover</h1>
+    <span class="muted">Programmes, liaisons et donnees &middot; trait plein = en service, pointilles = prevu</span>
+    <button id="btnSvg">Enregistrer en SVG</button>
+  </header>
+  <div class="feuille"><svg id="schema" viewBox="0 0 1600 1060" role="img" aria-label="Architecture : page web, IA du PC, rover et camera"></svg></div>
+  <p class="sources muted">
+    Detail des commandes : docs/Architecture.md &middot; IA : docs/IA.md &middot; cablage : schema electrique.
+    A mettre a jour avec chaque nouvelle fonction (fichier docs/architecture_rover.html).
+  </p>
+</div>
+
+<script>
+(() => {
+  // liens entre documents : fichiers voisins, ou apercu GitHub (htmlpreview)
+  const DEPOT = "https://github.com/ionmoshu7-arch/Experimental_bot/blob/main/docs/";
+  const surApercu = location.hostname === "htmlpreview.github.io";
+  document.querySelectorAll("[data-doc]").forEach(a => a.href = surApercu ? "?" + DEPOT + a.dataset.doc : a.dataset.doc);
+
+  const svg = document.getElementById("schema");
+  const NS = "http://www.w3.org/2000/svg";
+  let out = "";
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+  // ---------- primitives (comme le schema electrique) ----------
+  function boite(x, y, w, h, titre, lignes = [], o = {}) {
+    const dash = o.prevu ? ' stroke-dasharray="6 4"' : "";
+    const trait = o.couleur || (o.prevu ? "var(--plan)" : "var(--text)");
+    out += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="${o.fond || "var(--fill)"}" stroke="${trait}" stroke-width="${o.epais || 1.6}"${dash}/>`;
+    const ax = o.centre ? x + w / 2 : x + 10, anc = o.centre ? "middle" : "start";
+    let ty = y + (o.titreY || 20);
+    out += `<text x="${ax}" y="${ty}" text-anchor="${anc}" font-size="${o.taille || 13}" font-weight="700" ${o.titreC ? `style="fill:${o.titreC}"` : ""}>${esc(titre)}</text>`;
+    for (const l of lignes) {
+      ty += 16;
+      const [t, c] = Array.isArray(l) ? l : [l, null];
+      out += `<text x="${ax}" y="${ty}" text-anchor="${anc}" font-size="11.5" ${c ? `style="fill:${c}"` : 'style="fill:var(--muted)"'}>${esc(t)}</text>`;
+    }
+  }
+  function fil(pts, couleur, o = {}) {
+    const d = pts.map((p, i) => (i ? "L" : "M") + p[0] + " " + p[1]).join(" ");
+    out += `<path d="${d}" fill="none" stroke="${couleur}" stroke-width="${o.epais || 2}" ${o.prevu ? 'stroke-dasharray="6 4"' : ""} stroke-linejoin="round"`
+         + `${o.fin ? ` marker-end="url(#f-${o.fin})"` : ""}${o.debut ? ` marker-start="url(#d-${o.debut})"` : ""}/>`;
+  }
+  function texte(x, y, t, o = {}) {
+    out += `<text x="${x}" y="${y}" text-anchor="${o.anc || "start"}" font-size="${o.taille || 11}" ${o.gras ? 'font-weight="700"' : ""} ${o.c ? `style="fill:${o.c}"` : ""}>${esc(t)}</text>`;
+  }
+  // fleches aux couleurs des liaisons
+  const COULEURS = { ws: "var(--ws)", video: "var(--video)", usb: "var(--usb)", i2c: "var(--i2c)", motor: "var(--motor)", plan: "var(--plan)" };
+  out += "<defs>" + Object.entries(COULEURS).map(([k, c]) =>
+    `<marker id="f-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" style="fill:${c}"/></marker>` +
+    `<marker id="d-${k}" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" style="fill:${c}"/></marker>`).join("") + "</defs>";
+
+  // ================= UTILISATEURS ET PC (gauche) =================
+  texte(30, 50, "UTILISATEURS ET PC", { gras: true, c: "var(--muted)" });
+  boite(30, 60, 250, 150, "Page de commande", [
+    ["http://rover.local/ (PC ou telephone)", "var(--text)"],
+    "video + cadres de l'IA, fleches",
+    "missions, options de navigation",
+    "capteurs, carte, reglages",
+    "camera, journal, console",
+  ]);
+  boite(30, 230, 250, 80, "Telephone : RemoteXY", [
+    "joystick, vitesse, mode, STOP",
+    "port 6377 (application RemoteXY)",
+  ]);
+  boite(30, 330, 250, 140, "PC : IA du rover", [
+    ["ia/rover_ia.py (tache VS Code)", "var(--text)"],
+    "YOLOv8n + suivi ByteTrack",
+    "detections → page, 5/s",
+    "suit personne / objet (mission)",
+    "reglages venus de la page",
+  ], { couleur: "var(--pc)" });
+  boite(30, 500, 250, 110, "PC : VS Code + PlatformIO", [
+    "programme les 2 cartes",
+    "console des 2 cartes",
+    "(seul le cable de la camera)",
+  ], { couleur: "var(--pc)" });
+
+  // ================= ROVER (centre) =================
+  boite(400, 40, 580, 640, "ESP32-S3 ROVER  —  src/test_capteurs", [], { couleur: "var(--rover)", epais: 2.4, fond: "none", titreC: "var(--rover)" });
+  boite(420, 70, 265, 140, "Reseau", [
+    "page web :80 (embarquee)",
+    "WebSocket :81 (pages, camera, IA)",
+    "relais [IA] → pages, [POURIA] → IA",
+    "relais [POURCAM] → camera",
+    "mise a jour : POST /maj",
+  ]);
+  boite(700, 70, 265, 140, "Telemetrie", [
+    "[DATA] JSON 20 fois/s :",
+    "distances, couleurs, gyro, moteurs,",
+    "ligne, nav, options, mission,",
+    "position, terrain, WiFi, version",
+    "→ pages et IA ; 5/s → camera",
+  ]);
+  boite(420, 225, 265, 125, "Commandes", [
+    "A s c z O T K P R Q",
+    "L ligne · N navigation · M mission",
+    "Y options · U couleurs · I ordre IA",
+    "fleche manuelle = arret de mission",
+  ]);
+  boite(700, 225, 265, 125, "Missions", [
+    "explorer · retour base · patrouille",
+    "mur gauche / droit",
+    "suivre personne / objet (par l'IA)",
+    "photo a chaque point (camera)",
+  ]);
+  boite(420, 365, 265, 125, "Navigation", [
+    "lignes droites au gyroscope",
+    "obstacles, collisions, degagement",
+    "aller a un but (x, y), longer un mur",
+    "options : collision, degagement,",
+    "  tenue de cap, ecart des murs",
+  ]);
+  boite(700, 365, 265, 125, "Suivi de ligne", [
+    "3 capteurs couleur, regulateur PD",
+    "recherche si la ligne est perdue",
+    "capteurs couleur on/off (U) :",
+    "  eteints = suivi refuse",
+  ]);
+  boite(420, 505, 545, 64, "Reflexes de securite (toujours actifs, avant tout ordre)", [
+    "pas d'avance si obstacle < 25 cm devant · pas de recul si < 15 cm derriere · arret sans ordre 0,4 s",
+  ], { couleur: "var(--bad)", titreC: "var(--bad)" });
+  boite(420, 584, 545, 80, "lib/Rover (bibliotheque commune)", [
+    "Bus I2C + TCA9548A · Distance (4 ToF) · Couleur (3 TCS34725) · Gyro (MPU-6500)",
+    "Odometrie (x, y, cap) · Terrain (pentes, bosses, glissement) · Moteurs + encodeurs",
+    "Config.h : brochage, adresses, calibration",
+  ]);
+
+  // ================= CAMERA (droite) =================
+  boite(1100, 40, 480, 640, "ESP32-S3 CAM (N16R8 + OV2640)  —  src/camera", [], { couleur: "var(--cam)", epais: 2.4, fond: "none", titreC: "var(--cam)" });
+  boite(1120, 70, 440, 110, "ServeurCamera", [
+    "http :80 — /status /control /capture /photo /sd",
+    "  /journaux /vider (carte TF) /maj (programme)",
+    "flux video MJPEG :81 → page · :82 → IA",
+    "(un ecran par flux ; sinon image par image)",
+  ]);
+  boite(1120, 195, 210, 80, "Camera", ["OV2640, VGA", "rotation 90° (gardee)"]);
+  boite(1350, 195, 210, 80, "Enregistrement", ["video AVI sur la carte TF", "+ mesures .jsonl synchro"]);
+  boite(1120, 290, 440, 80, "LiaisonRover", [
+    "client WebSocket du rover",
+    "envoie [CAM] (etat, 1/s) · execute [POURCAM] photo",
+  ]);
+  boite(1120, 385, 440, 95, "Journal de navigation", [
+    "toutes les trames du rover → /journal/J<demarrage>_<n>.jsonl",
+    "nouveau fichier toutes les 10 min",
+    "efface les plus anciens au-dela de 48 h ou 2 Go",
+  ]);
+  boite(1120, 495, 440, 95, "Pont + RelaisMaj", [
+    "console USB des 2 cartes : [ROVER] ... et « cam ... »",
+    "!MAJROVER : recoit le programme du rover par USB",
+    "  et l'envoie au rover par WiFi (POST /maj)",
+  ]);
+  boite(1120, 605, 440, 55, "Carte TF", ["photos · videos · journal (vidable depuis la page)"]);
+
+  // ================= MATERIEL (bas) =================
+  texte(400, 728, "MATERIEL", { gras: true, c: "var(--muted)" });
+  boite(400, 740, 300, 130, "Capteurs (I2C, 100 kHz)", [
+    "TCA9548A 0x73 (multiplexeur)",
+    "VL53L1X avant · 3 × VL53L0X",
+    "3 × TCS34725 sous le rover (sol)",
+    "MPU-6500 0x68 (gyro + accel)",
+  ]);
+  boite(720, 740, 220, 130, "Propulsion", [
+    "2 × TB6612FNG",
+    "4 moteurs TT 1:48",
+    "4 encodeurs (576 imp/tour)",
+  ]);
+  boite(1100, 740, 480, 130, "Support camera 2 axes (prevu)", [
+    "PCA9685 0x40 : canal 1 = horizontal, canal 2 = vertical",
+    "servos pan / tilt pilotes par le rover",
+    "la camera pourra suivre seule une cible",
+    "avant que le rover tourne",
+  ], { prevu: true });
+
+  // ================= LIAISONS =================
+  // page <-> rover (WebSocket)
+  fil([[280, 120], [420, 120]], "var(--ws)", { fin: "ws", debut: "ws" });
+  texte(340, 112, "WebSocket :81", { anc: "middle", c: "var(--ws)", gras: true, taille: 10.5 });
+  texte(340, 136, "donnees ↔ ordres", { anc: "middle", c: "var(--ws)", taille: 10.5 });
+  // RemoteXY -> commandes
+  fil([[280, 270], [420, 270]], "var(--ws)", { fin: "ws" });
+  texte(340, 262, "RemoteXY :6377", { anc: "middle", c: "var(--ws)", gras: true, taille: 10.5 });
+  // IA <-> rover
+  fil([[280, 340], [420, 340]], "var(--ws)", { fin: "ws", debut: "ws" });
+  texte(340, 300, "WebSocket :81", { anc: "middle", c: "var(--ws)", gras: true, taille: 10.5 });
+  texte(340, 314, "[IA] detections,", { anc: "middle", c: "var(--ws)", taille: 10.5 });
+  texte(340, 328, "I vitesse rotation", { anc: "middle", c: "var(--ws)", taille: 10.5 });
+  texte(340, 358, "← [POURIA] reglages,", { anc: "middle", c: "var(--ws)", taille: 10.5 });
+  texte(340, 372, "suivre, stop", { anc: "middle", c: "var(--ws)", taille: 10.5 });
+  // camera <-> rover (WebSocket)
+  fil([[1120, 330], [965, 330]], "var(--ws)", { fin: "ws", debut: "ws" });
+  texte(1040, 300, "WebSocket :81", { anc: "middle", c: "var(--ws)", gras: true, taille: 10.5 });
+  texte(1040, 314, "[DATA] 5/s, messages →", { anc: "middle", c: "var(--ws)", taille: 10.5 });
+  texte(1040, 350, "← [CAM] etat", { anc: "middle", c: "var(--ws)", taille: 10.5 });
+  texte(1040, 364, "→ [POURCAM] photo", { anc: "middle", c: "var(--ws)", taille: 10.5 });
+  texte(1040, 378, "→ programme (/maj)", { anc: "middle", c: "var(--ws)", taille: 10.5 });
+  // video + HTTP : camera -> page et IA (couloir du haut et de gauche)
+  fil([[1500, 70], [1500, 20], [14, 20], [14, 400], [30, 400]], "var(--video)", { fin: "video" });
+  fil([[14, 135], [30, 135]], "var(--video)", { fin: "video" });
+  texte(700, 14, "video MJPEG :81 → page (ou image par image /capture) · :82 → IA · HTTP :80 : reglages, photos, video, journal, vider la carte",
+        { anc: "middle", c: "var(--video)", gras: true, taille: 10.5 });
+  // USB : PC <-> camera
+  fil([[155, 610], [155, 960], [1592, 960], [1592, 540], [1560, 540]], "var(--usb)", { fin: "usb", debut: "usb" });
+  texte(870, 952, "cable USB 460800 bauds (CH340) : console des 2 cartes, programme de la camera, programme du rover (relaye par WiFi)",
+        { anc: "middle", c: "var(--usb)", gras: true, taille: 10.5 });
+  // rover -> materiel
+  fil([[550, 664], [550, 740]], "var(--i2c)", { fin: "i2c", debut: "i2c" });
+  texte(558, 706, "I2C", { c: "var(--i2c)", gras: true, taille: 10.5 });
+  fil([[830, 664], [830, 740]], "var(--motor)", { fin: "motor", debut: "motor" });
+  texte(838, 700, "PWM →", { c: "var(--motor)", gras: true, taille: 10.5 });
+  texte(838, 714, "← encodeurs", { c: "var(--motor)", gras: true, taille: 10.5 });
+  fil([[960, 664], [960, 805], [1100, 805]], "var(--plan)", { prevu: true, fin: "plan" });
+  texte(1030, 797, "I2C (prevu)", { anc: "middle", c: "var(--plan)", taille: 10.5 });
+
+  // ================= LEGENDE + CHEMIN DES ORDRES =================
+  const ly = 1000;
+  [["ws", "WiFi WebSocket"], ["video", "video / HTTP"], ["usb", "USB"], ["i2c", "I2C"], ["motor", "moteurs"], ["plan", "prevu"]]
+    .forEach(([k, t], i) => {
+      const x = 30 + i * 150;
+      fil([[x, ly], [x + 40, ly]], COULEURS[k], { prevu: k === "plan" });
+      texte(x + 48, ly + 4, t, { taille: 11.5 });
+    });
+  texte(30, 1036, "Chemin des ordres : page / RemoteXY / IA / missions → Commandes → Navigation ou Suivi de ligne → reflexes de securite → moteurs.  Une seule source pilote a la fois ; STOP arrete tout.",
+        { taille: 12, gras: true });
+
+  svg.innerHTML = out;
+
+  // ---------- export SVG ----------
+  document.getElementById("btnSvg").onclick = () => {
+    const s = getComputedStyle(document.documentElement);
+    let src = new XMLSerializer().serializeToString(svg);
+    src = src.replace(/var\(--([a-z]+)\)/g, (_, n) => s.getPropertyValue("--" + n).trim());
+    src = src.replace("<svg ", `<svg xmlns="${NS}" style="background:${s.getPropertyValue("--paper").trim()};font-family:Segoe UI,Arial,sans-serif" `);
+    src = src.replace(/<text /g, `<text fill="${s.getPropertyValue("--text").trim()}" `);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([src], { type: "image/svg+xml" }));
+    a.download = "architecture_rover.svg";
+    a.click();
+  };
+})();
+</script>
+</body>
+</html>

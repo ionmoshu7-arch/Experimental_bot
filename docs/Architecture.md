@@ -1,5 +1,9 @@
 # Architecture du rover : 2 cartes ESP32-S3 + PC
 
+Schémas : [architecture de fonctionnement](architecture_rover.html) ([PNG](architecture_rover.png))
+· [schéma électrique](schema_rover.html) ([PNG](schema_rover.png))
+· page de commande : http://rover.local/ · caméra : http://camera.local/
+
 ```
  PC (VS Code) ──câble USB 460800──► ESP32-CAM ◄──WiFi WebSocket──► ESP32 ROVER
    │   console des 2 cartes          │  relaie : programme du rover,     ▲
@@ -52,6 +56,16 @@ Ouvrir le moniteur série de VS Code sur l'environnement `camera` (460800 bauds)
 | `L 1` / `L 0` | suivi de ligne marche / arrêt |
 | `N 1` / `N 0` | navigation autonome marche / arrêt |
 | `K` | calibrer le suivi de ligne (4 s) |
+| `M explorer 5` | mission : explorer 5 min (navigation libre, la carte se remplit) |
+| `M base` | mission : retour au point (0, 0), puis face au cap de départ |
+| `M point` / `M effacer` | mémoriser la position actuelle comme point de patrouille (8 au plus) / tout effacer |
+| `M patrouille` | parcourir les points en boucle (pause 1,5 s à chaque point) |
+| `M photos 1` / `0` | photo par la caméra à chaque point de patrouille |
+| `M mur g` / `M mur d` | longer le mur gauche (15 cm) / droit (12 cm) |
+| `M suivre person` | suivre une personne (ou un autre objet YOLO) avec l'IA du PC |
+| `M stop` | arrêter la mission |
+| `Y collision 0` / `1` | option : détection de collision (aussi `degagement`, `cap`, `murs`) ; gardée après redémarrage |
+| `U 0` / `U 1` | capteurs de couleur éteints / allumés (gardé après redémarrage) |
 
 - **Commandes pour la caméra** (préfixe `cam`) :
 
@@ -61,6 +75,8 @@ Ouvrir le moniteur série de VS Code sur l'environnement `camera` (460800 bauds)
 | `cam video 1` / `cam video 0` | lancer / arrêter l'enregistrement |
 | `cam res VGA` | résolution (QVGA, VGA, SVGA, XGA, HD, SXGA, UXGA) |
 | `cam etat` | état complet, dont la version |
+| `cam journal` | fichiers du journal de navigation |
+| `cam vider oui` | effacer toute la carte TF (photos, vidéos, journal) |
 | `cam liaison 0` / `1` | couper / rétablir la liaison avec le rover |
 | `cam` | aide |
 
@@ -69,8 +85,19 @@ Ouvrir le moniteur série de VS Code sur l'environnement `camera` (460800 bauds)
 Broche **5V** de la carte caméra, depuis le rail 5,6 V, à travers une diode 1N4007 (≈ 4,9 V).
 Pas le rail 3,3 V des capteurs : les pointes de courant du WiFi le perturberaient.
 
-## Prochaine étape : IA
+## Journal de navigation
 
-YOLOv8n en Python sur le PC. Elle lit la vidéo de la caméra par WiFi et envoie ses ordres
-au rover par le WebSocket, pour le suivi de personne et les obstacles vus par la caméra.
+La caméra écrit sur sa carte TF tout ce que le rover envoie : ses mesures `[DATA]`
+(5 fois par seconde, 10 pendant un enregistrement vidéo) et ses messages (`[NAV]`,
+`[MISSION]`, `[LIGNE]`...).
+- Fichiers `/journal/J<démarrage>_<n>.jsonl`, une ligne = `millisecondes<tab>message`.
+- Nouveau fichier toutes les 10 minutes ; les plus anciens sont effacés au-delà de 288
+  fichiers (48 h) ou 2 Go.
+- Liste et téléchargement : section « Journal de navigation » de la page, ou
+  http://camera.local/journaux.
+
+## IA (YOLOv8n sur le PC)
+
+Voir [IA.md](IA.md) : détections dans la page, réglages depuis la page, mission « Suivre ».
+Pour la faire évoluer avec Claude : [prompt_claude_yolo.md](prompt_claude_yolo.md).
 Les réflexes de sécurité du rover restent prioritaires.

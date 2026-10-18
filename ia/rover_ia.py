@@ -245,7 +245,8 @@ def main():
         while True:
             # ---- reglages venus de la page
             while not rover.reglages.empty():
-                cmd = rover.reglages.get().split()
+                # noms a plusieurs mots envoyes avec "_" : sports_ball -> sports ball
+                cmd = [c.replace("_", " ") for c in rover.reglages.get().split()]
                 if not cmd:
                     continue
                 if cmd[0] == "conf" and len(cmd) > 1:

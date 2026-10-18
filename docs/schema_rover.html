@@ -42,14 +42,23 @@
   svg { display: block; min-width: 1200px; width: 100%; height: auto; }
   svg text { fill: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .sources { margin-top: 12px; font-size: 13px; }
+  a { color: var(--sig); }
+  .liens { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin: 0 0 12px; }
+  .liens b { color: var(--text); }
   @media print {
-    body { background: #fff; } button { display: none; }
+    body { background: #fff; } button, .liens { display: none; }
     .feuille { border: none; padding: 0; }
   }
 </style>
 </head>
 <body>
 <div class="wrap">
+  <nav class="liens" aria-label="Documents du rover">
+    <b>Schema electrique</b>
+    <a data-doc="architecture_rover.html">Architecture</a>
+    <a href="http://rover.local/" target="_blank" rel="noopener">Page de commande (http://rover.local/)</a>
+    <a href="http://camera.local/" target="_blank" rel="noopener">Camera (http://camera.local/)</a>
+  </nav>
   <header>
     <h1>Schema du rover</h1>
     <span class="muted">Tous les composants connus &middot; trait plein = installe, pointilles = prevu</span>
@@ -64,6 +73,11 @@
 
 <script>
 (() => {
+  // liens entre documents : fichiers voisins, ou apercu GitHub (htmlpreview)
+  const DEPOT = "https://github.com/ionmoshu7-arch/Experimental_bot/blob/main/docs/";
+  const surApercu = location.hostname === "htmlpreview.github.io";
+  document.querySelectorAll("[data-doc]").forEach(a => a.href = surApercu ? "?" + DEPOT + a.dataset.doc : a.dataset.doc);
+
   const svg = document.getElementById("schema");
   const NS = "http://www.w3.org/2000/svg";
   let out = "";

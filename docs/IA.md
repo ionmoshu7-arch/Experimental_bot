@@ -85,7 +85,9 @@ appliquée) : la page les dessine directement sur la vidéo tournée.
 
 ## À savoir
 - La carte caméra a **deux flux vidéo** : le port 81 pour la page, le port 82 pour l'IA.
-  Chacun sert un seul écran à la fois. Les deux se partagent le WiFi de la caméra :
+  Chacun sert un seul écran à la fois ; si le flux de la page est déjà pris (page ouverte
+  sur le PC et sur le téléphone), la page passe toute seule en « image par image ».
+  Les flux se partagent le WiFi de la caméra :
   environ 10 images/s pour l'IA seule, et 5 en tout quand la page affiche aussi la vidéo.
 - L'environnement Python (≈ 1 Go) et le modèle sont dans `%LOCALAPPDATA%\RoverIA`, **hors
   du dossier OneDrive** : ils ne sont ni synchronisés ni envoyés sur GitHub.
