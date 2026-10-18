@@ -6,6 +6,8 @@
 #include "Distance.h"
 #include "Gyro.h"
 #include "Moteurs.h"
+#include "Couleur.h"
+#include "Missions.h"
 #include "Navigation.h"
 #include "Odometrie.h"
 #include "Terrain.h"
@@ -158,6 +160,14 @@ static void envoyerJson() {
           "\"rend\":%.2f,\"ess\":%d,\"essMax\":%d}",
           navigationNomEtat(), nv.capCible, nv.obstacles, nv.collisions, nv.vitesse,
           nv.evenement, nv.rendement, nv.essaiDegagement, nv.maxEssais);
+
+  ajouter(",\"opt\":{\"collision\":%d,\"degagement\":%d,\"cap\":%d,\"murs\":%d,\"couleur\":%d}",
+          nv.optCollision, nv.optDegagement, nv.optCap, nv.optMurs, couleurActifs());
+  const InfoMission &mi = missionInfo();
+  ajouter(",\"mission\":{\"m\":\"%s\",\"etat\":\"%s\",\"point\":%d,\"nbPoints\":%d,"
+          "\"reste\":%ld,\"photos\":%d,\"cible\":\"%s\",\"mode\":\"%s\"}",
+          missionNom(), mi.etat, mi.point + 1, mi.nbPoints, mi.resteS, mi.photos, mi.cible,
+          navigationNomMode());
 
   const Pose &po = odometriePose();
   ajouter(",\"pose\":{\"x\":%.0f,\"y\":%.0f,\"cap\":%.1f,\"d\":%.0f}",

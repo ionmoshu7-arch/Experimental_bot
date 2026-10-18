@@ -26,3 +26,6 @@ extern CapteurCouleur couleurs[3];
 
 void couleurInit();
 void couleurMettreAJour();
+// On / off (veille, plus de lecture) ; garde en memoire. La LED reste allumee.
+void couleurActiver(bool actif);
+bool couleurActifs();

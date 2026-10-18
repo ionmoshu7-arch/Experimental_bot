@@ -31,6 +31,10 @@ void reseauMettreAJour();          // a appeler a chaque tour de boucle
 void reseauSurMessage(RappelTexte rappel);       // texte recu d'un client
 void reseauSurDeconnexion(RappelSimple rappel);  // un client est parti
 void reseauSurOta(RappelSimple rappel);          // debut de mise a jour
+void reseauSurDeconnexionIA(RappelSimple rappel); // l'IA du PC est partie
+void reseauEnvoyerIA(const char* texte);         // vers l'IA du PC ([POURIA] ...)
+void reseauEnvoyerCamera(const char* texte);     // vers la camera ([POURCAM] ...)
+bool reseauIAConnectee();
 
 void reseauDiffuser(const char* texte, size_t longueur);   // vers tous les clients
 bool reseauConnecte();

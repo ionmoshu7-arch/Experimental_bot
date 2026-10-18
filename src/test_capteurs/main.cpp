@@ -41,6 +41,7 @@
 #include "Terrain.h"
 
 #include "Commandes.h"
+#include "Missions.h"
 #include "Navigation.h"
 #include "RemoteXYControle.h"
 #include "Reseau.h"
@@ -100,11 +101,14 @@ void setup() {
   // --- WiFi : pilotage et suivi depuis la page web ---
   reseauSurMessage(commandesTraiterWifi);
   reseauSurDeconnexion(arretGeneral);     // page fermee ou reseau coupe
-  reseauSurOta(arretGeneral);             // rien ne tourne pendant une mise a jour
+  reseauSurOta(arretGeneral);
+  // l'IA du PC part : arret seulement si elle pilotait (mission suivre)
+  reseauSurDeconnexionIA([]() { if (missionPiloteeParIA()) arretGeneral(); });             // rien ne tourne pendant une mise a jour
   reseauDemarrer(WIFI_SSID, WIFI_MOT_DE_PASSE, OTA_MOT_DE_PASSE, PAGE_CONTROLE);
   remoteXYDemarrer();                     // application telephone, meme WiFi
   Serial.println("================================================");
 
+  navigationOptionsCharger();
   odometrieInit();                        // origine de la carte : ici
   telemetrieDemarrer();
 }
@@ -124,6 +128,7 @@ void loop() {
   terrainMettreAJour();
   suiviLigneMettreAJour();
   navigationMettreAJour();
+  missionsMettreAJour();
   commandesSurveiller();
 
   telemetrieMettreAJour();

@@ -83,7 +83,7 @@ void pontMessageRover(const uint8_t* texte, size_t longueur) {
 
 // ---------- commandes de la camera ----------
 
-static void commandeCamera(const char* c) {
+void pontCommandeCamera(const char* c) {
   if (!strcmp(c, "photo")) {
     camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) { Serial.println("[CAM] pas d'image"); return; }
@@ -128,7 +128,7 @@ static void executerLigne() {
   } else if (!strcmp(ligne, "!PING")) {
     Serial.println("[PONT] PONG");
   } else if (!strncmp(ligne, "cam ", 4) || !strcmp(ligne, "cam")) {
-    commandeCamera(lg > 4 ? ligne + 4 : "aide");
+    pontCommandeCamera(lg > 4 ? ligne + 4 : "aide");
   } else {
     char message[sizeof(ligne) + 2];
     snprintf(message, sizeof(message), "%s\n", ligne);

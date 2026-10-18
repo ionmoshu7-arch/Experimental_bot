@@ -42,6 +42,14 @@ static void evenement(WStype_t type, uint8_t* donnees, size_t longueur) {
         derniereTrame = millis();
         enregistrementMesure(donnees + 6, longueur - 6);   // mesures synchronisees
       }
+      // ordre d'une mission ou de la page : "[POURCAM] photo"
+      if (longueur > 10 && longueur < 64 && !memcmp(donnees, "[POURCAM] ", 10)) {
+        char commande[64];
+        memcpy(commande, donnees + 10, longueur - 10);
+        commande[longueur - 10] = 0;
+        pontCommandeCamera(commande);
+        break;
+      }
       journalMessage(donnees, longueur);                   // journal de navigation
       pontMessageRover(donnees, longueur);                 // console sur le cable USB
       break;

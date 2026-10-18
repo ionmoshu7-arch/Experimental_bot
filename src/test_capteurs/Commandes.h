@@ -15,6 +15,9 @@
  *   Q vitesse + Entree : vitesse de croisiere de la navigation
  *   O + Entree : nouvelle origine de la carte (position 0, 0)
  *   T + Entree : pente remise a zero (rover pose sur sol plat)
+ *   M <mission> ... : missions autonomes (voir Missions.h)
+ *   Y <option> 0|1 : options de navigation (collision, degagement, cap, murs)
+ *   U 0|1 : capteurs de couleur eteints / allumes
  *   I vitesse rotation + Entree : ordre de l IA (PC), -255..255 chacun,
  *       rotation > 0 = a gauche ; obstacle devant/derriere : pas d avance/recul
  *
@@ -37,3 +40,4 @@ void arretGeneral();          // arrete le suivi de ligne et les moteurs
 // Pilotage manuel par cote (joystick RemoteXY) : comme la commande A,
 // arrete les modes autonomes ; a repeter < 400 ms
 void commandeManuelle(int droite, int gauche);
+void commandeManuelle(int droite, int gauche, bool depuisIA);   // garde la mission suivre

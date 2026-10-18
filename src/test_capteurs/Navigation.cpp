@@ -5,6 +5,8 @@
 #include "Distance.h"
 #include "Gyro.h"
 #include "Moteurs.h"
+#include "Odometrie.h"
+#include <Preferences.h>
 #include "Telemetrie.h"
 
 // ---------- obstacles vus par les capteurs ----------
@@ -64,7 +66,18 @@ static const int NB_PHASES_SECOUSSE = sizeof(SECOUSSE);
 static const int MAX_ESSAIS_DEGAGEMENT = 4;
 static const unsigned long ROUTE_LIBRE_MS = 3000;   // sans collision : degage
 
-static InfoNav info = { N_ARRET, 0, 0, 0, 110, "", 0, 0, MAX_ESSAIS_DEGAGEMENT };
+// ---------- modes but / mur / orienter ----------
+static const float RAYON_ARRIVEE_MM = 150;
+static const float ANGLE_TOURNER_D_ABORD = 60;   // ecart de cap au-dela : virage sur place
+static const int MUR_CIBLE_GAUCHE_MM = 150;       // distance au mur longe
+static const int MUR_CIBLE_DROITE_MM = 120;       // (portee du capteur droit : 25 cm)
+static const float KP_MUR_DEG_S_PAR_MM = 0.3;
+static const float CHERCHE_MUR_DEG_S = 20;        // plus de mur : on tourne vers lui
+
+static InfoNav info = { N_ARRET, 0, 0, 0, 110, "", 0, 0, MAX_ESSAIS_DEGAGEMENT,
+                        true, true, true, true, false, 0, 0, 0 };
+static bool arretApresVirage = false;   // mode orienter
+static bool butAtteint = false;
 static unsigned long debutEtat = 0, dernierPas = 0;
 static unsigned long debutBlocageD = 0, debutBlocageG = 0, debutVirageBloque = 0;
 static bool reculerEnsuite = false, grandVirage = false;
@@ -95,6 +108,7 @@ void navigationArreter(const char* raison) {
   moteursStop();
   moteursActiver(false);
   info.etat = N_ARRET;
+  arretApresVirage = false;
   if (raison) journal("%s", raison);
 }
 
@@ -110,6 +124,83 @@ void navigationDemarrer() {
   moteursActiver(true);
   changer(N_AVANCE);
   journal("[NAV] navigation autonome demarree (vitesse %d)", info.vitesse);
+}
+
+// ---------- options ----------
+void navigationOptionsCharger() {
+  Preferences p;
+  p.begin("nav", true);
+  info.optCollision = p.getBool("collision", true);
+  info.optDegagement = p.getBool("degagement", true);
+  info.optCap = p.getBool("cap", true);
+  info.optMurs = p.getBool("murs", true);
+  p.end();
+}
+
+bool navigationOption(const char* nom, bool active) {
+  bool* o = !strcmp(nom, "collision") ? &info.optCollision
+          : !strcmp(nom, "degagement") ? &info.optDegagement
+          : !strcmp(nom, "cap") ? &info.optCap
+          : !strcmp(nom, "murs") ? &info.optMurs : nullptr;
+  if (!o) return false;
+  *o = active;
+  Preferences p;
+  p.begin("nav", false);
+  p.putBool(nom, active);
+  p.end();
+  journal("[NAV] option %s : %s", nom, active ? "active" : "desactivee");
+  return true;
+}
+
+// ---------- modes ----------
+static float ecartAngle(float a) {               // ramene dans -180..180
+  return fmodf(a + 540.0f, 360.0f) - 180.0f;
+}
+
+void navigationLibre() {
+  info.aBut = false;
+  info.mur = 0;
+  arretApresVirage = false;
+}
+
+void navigationAllerVers(float x, float y) {
+  navigationLibre();
+  info.butX = x; info.butY = y;
+  info.aBut = true;
+  butAtteint = false;
+  journal("[NAV] but (%.2f, %.2f) m", x / 1000, y / 1000);
+  if (info.etat == N_ARRET) navigationDemarrer();
+}
+
+void navigationLongerMur(int8_t cote) {
+  navigationLibre();
+  info.mur = cote >= 0 ? 1 : -1;
+  journal("[NAV] longe le mur %s", info.mur > 0 ? "gauche" : "droit");
+  if (info.etat == N_ARRET) navigationDemarrer();
+}
+
+void navigationOrienter(float capCarte) {
+  navigationLibre();
+  butAtteint = false;
+  if (info.etat == N_ARRET) navigationDemarrer();
+  if (info.etat == N_ARRET) return;              // demarrage refuse
+  info.capCible = gyroCap() + ecartAngle(capCarte - odometriePose().cap);
+  arretApresVirage = true;
+  changer(N_TOURNE);
+}
+
+bool navigationButAtteint() {
+  bool b = butAtteint;
+  butAtteint = false;
+  return b;
+}
+
+const char* navigationNomMode() {
+  if (arretApresVirage) return "orienter";
+  if (info.aBut) return "but";
+  if (info.mur > 0) return "mur gauche";
+  if (info.mur < 0) return "mur droit";
+  return "libre";
 }
 
 void navigationVitesse(int vitesse) {
@@ -237,6 +328,10 @@ static void commencerSecousse(const char* raison) {
 }
 
 static void commencerDegagement() {
+  if (!info.optDegagement) {
+    navigationArreter("[NAV] rover coince, degagement automatique desactive : arret");
+    return;
+  }
   for (auto &t : instantsCollision) t = 0;   // nouvel historique pour la suite
   info.essaiDegagement = 0;
   journal("[NAV] rover coince : degagement");
@@ -268,7 +363,7 @@ static void obstacle(int devant) {
   moteursStop();
   reculerEnsuite = devant < SEUIL_TRES_PRES_MM;
   grandVirage = false;
-  coteImpact = 0;
+  coteImpact = -info.mur;        // longe un mur : tourne du cote oppose (0 sinon)
   distanceRecul = RECUL_CM;
   changer(N_PAUSE);
 }
@@ -310,6 +405,10 @@ static void collision(const char* cause, int cote) {
 
 // Roule en tenant le cap : base > 0 en avant, < 0 en arriere
 static void roulerAuCap(float base) {
+  if (!info.optCap && !info.aBut && info.mur == 0) {   // option coupee : meme consigne partout
+    moteursCotes((int) base, (int) base);
+    return;
+  }
   float ecart = gyroCap() - info.capCible;    // > 0 : le rover a derive a gauche
   float correction = KP_CAP * ecart + KD_CAP * gyroVitesseZ();
   float limite = fabsf(base) * 0.8;
@@ -341,11 +440,12 @@ void navigationMettreAJour() {
         journal("[NAV] rover degage, navigation normale");
       }
 
-      if (!demarrage) {
+      if (!demarrage && info.optCollision) {
         if (choc > SEUIL_CHOC_G) { collision("choc", coteDepuisRotation()); return; }
 
         float ecart = gyroCap() - info.capCible;
-        if (fabsf(ecart) > DEVIATION_MAX_DEG) {
+        bool capTenu = info.optCap || info.aBut || info.mur != 0;
+        if (capTenu && fabsf(ecart) > DEVIATION_MAX_DEG) {
           collision("pousse hors de son cap", ecart < 0 ? +1 : -1);
           return;
         }
@@ -361,10 +461,38 @@ void navigationMettreAJour() {
         if (!debutBlocageD && !debutBlocageG) apprendreRendement(rD, rG);
       }
 
-      // mur trop proche sur un cote : le cap cible s'en ecarte
-      int g = distanceUtile(CANAL_GAUCHE), d = distanceUtile(CANAL_DROITE);
-      if (g > 0 && g < MUR_GAUCHE_MM) info.capCible -= ECART_MUR_DEG_S * dt;
-      if (d > 0 && d < MUR_DROITE_MM) info.capCible += ECART_MUR_DEG_S * dt;
+      // vers le but : cap cible oriente vers le point, virage d'abord si trop d'ecart
+      if (info.aBut) {
+        const Pose &po = odometriePose();
+        float dx = info.butX - po.x, dy = info.butY - po.y;
+        if (sqrtf(dx * dx + dy * dy) < RAYON_ARRIVEE_MM) {
+          info.aBut = false;
+          butAtteint = true;
+          navigationArreter("[NAV] but atteint");
+          return;
+        }
+        float ecartBut = ecartAngle(atan2f(dy, dx) * RAD_TO_DEG - po.cap);
+        info.capCible = gyroCap() + ecartBut;
+        if (fabsf(ecartBut) > ANGLE_TOURNER_D_ABORD) { changer(N_TOURNE); return; }
+      }
+
+      // longer un mur : regulateur sur la distance laterale
+      if (info.mur != 0) {
+        uint8_t canal = info.mur > 0 ? CANAL_GAUCHE : CANAL_DROITE;
+        int cible = info.mur > 0 ? MUR_CIBLE_GAUCHE_MM : MUR_CIBLE_DROITE_MM;
+        int dm = tof[canal].etat == M_OK ? tof[canal].brut : -1;
+        float vitesseCap = dm > 0
+          ? constrain((dm - cible) * KP_MUR_DEG_S_PAR_MM, -30.0f, 30.0f)   // trop loin : vers le mur
+          : CHERCHE_MUR_DEG_S;                                             // plus de mur : le chercher
+        info.capCible += info.mur * vitesseCap * dt;                       // mur gauche = cap +
+      }
+
+      // mur trop proche sur un cote : le cap cible s'en ecarte (option)
+      if (info.optMurs) {
+        int g = distanceUtile(CANAL_GAUCHE), d = distanceUtile(CANAL_DROITE);
+        if (info.mur <= 0 && g > 0 && g < MUR_GAUCHE_MM) info.capCible -= ECART_MUR_DEG_S * dt;
+        if (info.mur >= 0 && d > 0 && d < MUR_DROITE_MM) info.capCible += ECART_MUR_DEG_S * dt;
+      }
 
       // ralentit en approchant d'un obstacle
       float f = (float) (devant - SEUIL_OBSTACLE_MM) / (DEBUT_RALENTI_MM - SEUIL_OBSTACLE_MM);
@@ -385,7 +513,7 @@ void navigationMettreAJour() {
       int ar = distanceUtile(CANAL_ARRIERE);
       float parcouruCm = compteMoyen() / IMPULSIONS_PAR_TOUR * CIRCONFERENCE_CM;
       bool bloque = false;
-      if (!demarrage && nbEchantillons >= 40) {
+      if (!demarrage && info.optCollision && nbEchantillons >= 40) {
         bool bD = blocageCote(rendement(true), debutBlocageD, maintenant);
         bool bG = blocageCote(rendement(false), debutBlocageG, maintenant);
         bloque = (bD && bG) || choc > SEUIL_CHOC_G;
@@ -409,12 +537,18 @@ void navigationMettreAJour() {
       float ecart = info.capCible - gyroCap();   // > 0 : il faut tourner a gauche
       if (fabsf(ecart) < TOLERANCE_VIRAGE_DEG) {
         moteursStop();
+        if (arretApresVirage) {          // mode orienter : c'est fini
+          arretApresVirage = false;
+          butAtteint = true;
+          navigationArreter("[NAV] orientation atteinte");
+          return;
+        }
         info.evenement = "en route";
         changer(N_AVANCE);   // garde exactement le cap vise
         return;
       }
       // moteurs en rotation mais le rover ne pivote pas : il est coince
-      if (!demarrage && fabsf(gyroVitesseZ()) < ROTATION_MIN_DEG_S) {
+      if (!demarrage && info.optCollision && fabsf(gyroVitesseZ()) < ROTATION_MIN_DEG_S) {
         if (!debutVirageBloque) debutVirageBloque = maintenant;
         else if (maintenant - debutVirageBloque > DUREE_VIRAGE_BLOQUE_MS) {
           collision("virage bloque", ecart > 0 ? -1 : +1);

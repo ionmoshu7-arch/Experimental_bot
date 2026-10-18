@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include "Bus.h"
 #include "Config.h"
+#include <Preferences.h>
 
 // Temps d'integration = (256 - ATIME) x 2,4 ms
 static const uint8_t TCS_ATIME = 0xF6;                // 10 cycles = 24 ms (~40 mesures/s)
@@ -100,10 +101,43 @@ static void lireCapteur(CapteurCouleur &k) {
   k.couleur = classer(k);
 }
 
+// Capteurs eteints : veille (ENABLE = 0), plus aucune lecture I2C.
+// Leur LED blanche reste allumee : sa broche n'est pas reliee a une sortie.
+static bool actifs = true;
+
 void couleurInit() {
   for (auto &k : couleurs) initCapteur(k);
+  Preferences p;
+  p.begin("couleur", true);
+  bool memorise = p.getBool("actifs", true);
+  p.end();
+  if (!memorise) couleurActiver(false);
 }
 
+void couleurActiver(bool actif) {
+  actifs = actif;
+  for (auto &k : couleurs) {
+    if (!k.present) continue;
+    muxChoisir(k.canal);
+    if (actif) {
+      tcsEcrire(0x00, 0x01);             // PON
+      delay(3);
+      tcsEcrire(0x00, 0x03);             // PON + AEN
+    } else {
+      tcsEcrire(0x00, 0x00);             // veille
+      k.valide = false;                  // plus de mesure fraiche
+      k.couleur = "eteint";
+    }
+  }
+  Preferences p;
+  p.begin("couleur", false);
+  p.putBool("actifs", actif);
+  p.end();
+}
+
+bool couleurActifs() { return actifs; }
+
 void couleurMettreAJour() {
+  if (!actifs) return;
   for (auto &k : couleurs) lireCapteur(k);
 }

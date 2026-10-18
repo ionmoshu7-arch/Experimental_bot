@@ -20,6 +20,15 @@
  *          pivots alternes, plus de puissance), puis nouveau tour
  *     Libre apres 3 s sans collision. Arret seulement apres 4 essais.
  *
+ * Modes (utilises par les missions, Missions.h) :
+ *   - libre : explore en evitant les obstacles
+ *   - but : va vers un point (x, y) de la carte (odometrie), en evitant
+ *   - mur : longe le mur gauche ou droit (capteur lateral, ~15 cm)
+ *   - orienter : tourne sur place vers un cap puis s'arrete
+ *
+ * Options activables (gardees en memoire) : detection de collision,
+ * degagement automatique, tenue de cap au gyroscope, ecartement des murs.
+ *
  * Arret : bouton de la page, STOP, Espace, commande manuelle, page
  * fermee. Demande le gyroscope (cap) et le capteur avant.
  */
@@ -40,11 +49,30 @@ struct InfoNav {
   float rendement;      // (mm/s)/consigne appris en roulant, 0 = pas encore
   uint8_t essaiDegagement;   // 0 = pas en degagement, sinon essai en cours
   uint8_t maxEssais;
+  // options (interrupteurs de la page)
+  bool optCollision, optDegagement, optCap, optMurs;
+  // mode
+  bool aBut;            // va vers (butX, butY)
+  float butX, butY;     // mm, repere de la carte
+  int8_t mur;           // +1 longe le mur gauche, -1 le mur droit, 0 non
 };
+
+enum OptionNav { OPT_COLLISION, OPT_DEGAGEMENT, OPT_CAP, OPT_MURS };
 
 void navigationDemarrer();
 void navigationArreter(const char* raison);
 void navigationVitesse(int vitesse);
+void navigationOptionsCharger();  // au demarrage (memoire NVS)
+bool navigationOption(const char* nom, bool active);   // "collision", "degagement", "cap", "murs"
+
+// Modes pour les missions (demarrent la navigation si besoin)
+void navigationAllerVers(float x, float y);   // mm ; arrivee a 15 cm
+void navigationLongerMur(int8_t cote);        // +1 gauche, -1 droite
+void navigationOrienter(float capCarte);      // cap de la carte (deg), puis arret
+void navigationLibre();                       // plus de but ni de mur
+// Vrai une fois apres l'arrivee au but ou la fin de l'orientation
+bool navigationButAtteint();
+const char* navigationNomMode();
 void navigationMettreAJour();     // a appeler a chaque tour de boucle
 
 bool navigationActive();

@@ -6,7 +6,9 @@
 #include "Moteurs.h"
 #include "Odometrie.h"
 #include "Terrain.h"
+#include "Missions.h"
 #include "Navigation.h"
+#include "Couleur.h"
 #include "SuiviLigne.h"
 #include "Telemetrie.h"
 
@@ -27,24 +29,33 @@ void arreterMoteurs() {
 }
 
 void arretGeneral() {
+  missionArreter("arretee");
   suiviLigneArreter("[LIGNE] arret");
   navigationArreter("[NAV] arret");
   arreterMoteurs();
 }
 
+// Modes qui pilotent seuls les moteurs (pas de surveillance des 400 ms).
+// La mission "suivre" est pilotee par l'IA : ses ordres I doivent arriver.
 static bool modeAutonome() {
-  return suiviLigneOccupe() || navigationActive();
+  return suiviLigneOccupe() || navigationActive() ||
+         (missionActive() && !missionPiloteeParIA());
 }
 
 // une commande manuelle reprend la main sur les modes autonomes
-static void reprendreLaMain() {
+static void reprendreLaMain(bool depuisIA = false) {
+  if (!depuisIA && missionActive()) missionArreter("arretee : commande manuelle");
   if (suiviLigneOccupe()) suiviLigneArreter("[LIGNE] arret : commande manuelle");
   if (navigationActive()) navigationArreter("[NAV] arret : commande manuelle");
   derniereCommandeMoteurs = millis();
 }
 
 void commandeManuelle(int droite, int gauche) {
-  reprendreLaMain();
+  commandeManuelle(droite, gauche, false);
+}
+
+void commandeManuelle(int droite, int gauche, bool depuisIA) {
+  reprendreLaMain(depuisIA);
   moteursCotes(droite, gauche);
   moteursActiver(moteursActifs());
 }
@@ -64,7 +75,8 @@ static void commandeIA(int vitesse, int rotation) {
   if (vitesse > 0 && devant >= 0 && devant < IA_DISTANCE_AVANT_MIN) vitesse = 0;
   if (vitesse < 0 && derriere >= 0 && derriere < IA_DISTANCE_ARRIERE_MIN) vitesse = 0;
   commandeManuelle(constrain(vitesse + rotation, -255, 255),    // droite
-                   constrain(vitesse - rotation, -255, 255));   // gauche
+                   constrain(vitesse - rotation, -255, 255),    // gauche
+                   true);                                       // garde la mission suivre
 }
 
 static void executerLigne(Lecteur &l) {
@@ -80,6 +92,16 @@ static void executerLigne(Lecteur &l) {
     reprendreLaMain();
     for (int i = 0; i < 4; i++) moteurAppliquer(i, v[i]);
     moteursActiver(moteursActifs());
+  } else if (cmd == 'M' && l.lg > 1) {
+    missionCommande(args);
+  } else if (cmd == 'Y') {
+    char nom[16];
+    if (sscanf(args, " %15s %d", nom, &v[0]) != 2 || !navigationOption(nom, v[0] != 0))
+      journal("Option inconnue : %s (collision, degagement, cap, murs)", args);
+  } else if (cmd == 'U' && sscanf(args, "%d", &v[0]) == 1) {
+    if (!v[0]) suiviLigneArreter("[LIGNE] arret : capteurs de couleur eteints");
+    couleurActiver(v[0] != 0);
+    journal("[COULEUR] capteurs %s", v[0] ? "allumes" : "eteints (LED toujours allumee)");
   } else if (cmd == 'L' && sscanf(args, "%d", &v[0]) == 1) {
     if (v[0]) { navigationArreter("[NAV] arret : suivi de ligne"); suiviLigneDemarrer(); }
     else suiviLigneArreter("[LIGNE] arret demande");

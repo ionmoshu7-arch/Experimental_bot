@@ -78,6 +78,7 @@ void suiviLigneArreter(const char* raison) {
 }
 
 void suiviLigneDemarrer() {
+  if (!couleurActifs())  { journal("[LIGNE] capteurs de couleur eteints : les rallumer d'abord"); return; }
   if (!capteursPrets()) { journal("[LIGNE] capteurs de couleur absents"); return; }
   if (!info.calibre)    { journal("[LIGNE] calibrer d'abord (bouton Calibrer)"); return; }
   if (info.etat == L_CALIBRATION) return;
@@ -91,6 +92,7 @@ void suiviLigneDemarrer() {
 
 void suiviLigneCalibrer() {
   suiviLigneArreter(nullptr);
+  if (!couleurActifs())  { journal("[LIGNE] capteurs de couleur eteints : les rallumer d'abord"); return; }
   if (!capteursPrets()) { journal("[LIGNE] capteurs de couleur absents"); return; }
   for (int i = 0; i < 3; i++) { calMin[i] = 0xFFFF; calMax[i] = 0; }
   debutCalibration = millis();

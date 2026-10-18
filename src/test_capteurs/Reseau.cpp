@@ -24,6 +24,29 @@ static RappelSimple rappelOta = nullptr;
 // son depart n'arrete pas les moteurs.
 static bool estCamera[WEBSOCKETS_SERVER_CLIENT_MAX] = { false };
 static bool cameraEnregistre = false;   // la camera enregistre une video
+// L'IA du PC (ia/rover_ia.py) s'annonce par "[IA]{...}" : ses detections
+// sont relayees aux pages ; elle recoit les messages "[POURIA] ..." des
+// pages et des missions. Son depart n'arrete les moteurs que si elle
+// pilotait (rappelDeconnexionIA).
+static bool estIA[WEBSOCKETS_SERVER_CLIENT_MAX] = { false };
+static RappelSimple rappelDeconnexionIA = nullptr;
+
+static bool estPage(uint8_t i) { return !estCamera[i] && !estIA[i]; }
+
+// Message d'une page ou d'une mission vers les clients d'un type
+static void envoyerA(bool* type, const char* texte, size_t longueur) {
+  for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++)
+    if (type[i]) webSocket.sendTXT(i, (const uint8_t*) texte, longueur);
+}
+
+void reseauEnvoyerIA(const char* texte) { envoyerA(estIA, texte, strlen(texte)); }
+void reseauEnvoyerCamera(const char* texte) { envoyerA(estCamera, texte, strlen(texte)); }
+void reseauSurDeconnexionIA(RappelSimple rappel) { rappelDeconnexionIA = rappel; }
+
+bool reseauIAConnectee() {
+  for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++) if (estIA[i]) return true;
+  return false;
+}
 
 static void evenementWebSocket(uint8_t client, WStype_t type, uint8_t* donnees, size_t longueur) {
   switch (type) {
@@ -35,6 +58,12 @@ static void evenementWebSocket(uint8_t client, WStype_t type, uint8_t* donnees, 
       if (client < WEBSOCKETS_SERVER_CLIENT_MAX && estCamera[client]) {
         estCamera[client] = false;
         Serial.println("[CAM] camera deconnectee");
+        break;
+      }
+      if (client < WEBSOCKETS_SERVER_CLIENT_MAX && estIA[client]) {
+        estIA[client] = false;
+        Serial.println("[IA] IA du PC deconnectee");
+        if (rappelDeconnexionIA) rappelDeconnexionIA();
         break;
       }
       Serial.printf("[WIFI] client %u deconnecte\n", client);
@@ -52,6 +81,24 @@ static void evenementWebSocket(uint8_t client, WStype_t type, uint8_t* donnees, 
         Serial.println();
         for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++)
           if (i != client && !estCamera[i]) webSocket.sendTXT(i, donnees, longueur);
+        break;
+      }
+      if (longueur >= 4 && !memcmp(donnees, "[IA]", 4)) {
+        if (client < WEBSOCKETS_SERVER_CLIENT_MAX && !estIA[client]) {
+          estIA[client] = true;
+          Serial.printf("[IA] IA du PC connectee (%s)\n", webSocket.remoteIP(client).toString().c_str());
+        }
+        for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++)
+          if (estPage(i)) webSocket.sendTXT(i, donnees, longueur);
+        break;
+      }
+      // page -> IA ou camera : relaye tel quel
+      if (longueur >= 8 && !memcmp(donnees, "[POURIA]", 8)) {
+        envoyerA(estIA, (const char*) donnees, longueur);
+        break;
+      }
+      if (longueur >= 9 && !memcmp(donnees, "[POURCAM]", 9)) {
+        envoyerA(estCamera, (const char*) donnees, longueur);
         break;
       }
       if (rappelMessage) rappelMessage((const char*) donnees, longueur);

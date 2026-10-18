@@ -19,3 +19,6 @@ constexpr unsigned long VITESSE_SERIE_CAMERA = 460800;
 void pontDemarrer();
 void pontMettreAJour();                                  // a chaque tour de boucle
 void pontMessageRover(const uint8_t* texte, size_t longueur);   // appele par la liaison
+// Commande pour la camera (sans le prefixe "cam ") : photo, video 1, etat...
+// Aussi utilisee pour les ordres du rover "[POURCAM] photo" (patrouille).
+void pontCommandeCamera(const char* commande);

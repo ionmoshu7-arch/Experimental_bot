@@ -56,6 +56,14 @@ constexpr uint8_t ENC2_A = 19, ENC2_B = 18;
 constexpr uint8_t ENC3_A = 47, ENC3_B = 48;
 constexpr uint8_t ENC4_A = 17, ENC4_B = 21;
 
+// ================== SUPPORT CAMERA 2 AXES (PREVU) ==================
+// Aujourd'hui la camera est fixe et regarde droit devant. Un support
+// pan / tilt sera pilote par le PCA9685 #1 (0x40) : canal 1 = horizontal,
+// canal 2 = vertical (voir docs/schema_rover.html). Pas encore code.
+constexpr uint8_t ADRESSE_PCA9685_SERVOS = 0x40;
+constexpr uint8_t CANAL_SERVO_CAMERA_PAN = 1;
+constexpr uint8_t CANAL_SERVO_CAMERA_TILT = 2;
+
 // ================== CALIBRATION ==================
 
 constexpr float IMPULSIONS_PAR_TOUR = 576.0;   // 3 x 48 x 4
