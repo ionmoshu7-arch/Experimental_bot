@@ -1,0 +1,30 @@
+{
+  // IA du rover (YOLOv8n sur le PC) : Terminal > Executer la tache...
+  // Environnement Python : %LOCALAPPDATA%\RoverIA\venv (ia/installer.ps1)
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "IA rover : voir (detections, aucun ordre moteur)",
+      "type": "process",
+      "command": "${env:LOCALAPPDATA}\\RoverIA\\venv\\Scripts\\python.exe",
+      "args": ["${workspaceFolder}\\ia\\rover_ia.py", "--mode", "voir"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "IA rover : suivre une personne (demarre en pause, G = go)",
+      "type": "process",
+      "command": "${env:LOCALAPPDATA}\\RoverIA\\venv\\Scripts\\python.exe",
+      "args": ["${workspaceFolder}\\ia\\rover_ia.py", "--mode", "suivre"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "IA rover : installer / mettre a jour Python et YOLO",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\ia\\installer.ps1"],
+      "problemMatcher": []
+    }
+  ]
+}

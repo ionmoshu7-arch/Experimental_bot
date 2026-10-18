@@ -1,5 +1,7 @@
 #include "Commandes.h"
 
+#include "Config.h"
+#include "Distance.h"
 #include "Gyro.h"
 #include "Moteurs.h"
 #include "Odometrie.h"
@@ -47,6 +49,24 @@ void commandeManuelle(int droite, int gauche) {
   moteursActiver(moteursActifs());
 }
 
+// Ordre de l'IA (PC) : vitesse d'avance et rotation, chacune -255..255
+// (rotation > 0 = vers la gauche). Les reflexes du rover passent avant :
+// pas d'avance si un obstacle est trop pres devant, pas de recul s'il est
+// trop pres derriere. Comme la commande A : a repeter < 400 ms.
+static const int IA_DISTANCE_AVANT_MIN = 250;    // mm
+static const int IA_DISTANCE_ARRIERE_MIN = 150;  // mm
+
+static void commandeIA(int vitesse, int rotation) {
+  vitesse = constrain(vitesse, -255, 255);
+  rotation = constrain(rotation, -255, 255);
+  int devant = distanceUtile(CANAL_AVANT);
+  int derriere = distanceUtile(CANAL_ARRIERE);
+  if (vitesse > 0 && devant >= 0 && devant < IA_DISTANCE_AVANT_MIN) vitesse = 0;
+  if (vitesse < 0 && derriere >= 0 && derriere < IA_DISTANCE_ARRIERE_MIN) vitesse = 0;
+  commandeManuelle(constrain(vitesse + rotation, -255, 255),    // droite
+                   constrain(vitesse - rotation, -255, 255));   // gauche
+}
+
 static void executerLigne(Lecteur &l) {
   l.ligne[l.lg] = 0;
   char cmd = toupper(l.ligne[0]);
@@ -54,7 +74,9 @@ static void executerLigne(Lecteur &l) {
   int v[4];
   float kp, kd;
 
-  if (cmd == 'A' && sscanf(args, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]) == 4) {
+  if (cmd == 'I' && sscanf(args, "%d %d", &v[0], &v[1]) == 2) {
+    commandeIA(v[0], v[1]);
+  } else if (cmd == 'A' && sscanf(args, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]) == 4) {
     reprendreLaMain();
     for (int i = 0; i < 4; i++) moteurAppliquer(i, v[i]);
     moteursActiver(moteursActifs());

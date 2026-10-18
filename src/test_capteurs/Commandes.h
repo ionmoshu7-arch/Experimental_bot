@@ -15,6 +15,8 @@
  *   Q vitesse + Entree : vitesse de croisiere de la navigation
  *   O + Entree : nouvelle origine de la carte (position 0, 0)
  *   T + Entree : pente remise a zero (rover pose sur sol plat)
+ *   I vitesse rotation + Entree : ordre de l IA (PC), -255..255 chacun,
+ *       rotation > 0 = a gauche ; obstacle devant/derriere : pas d avance/recul
  *
  * Securite : sans commande moteur depuis 400 ms, tout s'arrete
  * (sauf en mode autonome, qui a ses propres arrets).

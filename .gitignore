@@ -7,3 +7,8 @@
 # Identifiants WiFi et OTA : jamais sur GitHub
 include/secrets.h
 secrets.ini
+
+# IA : environnement Python et modeles (hors OneDrive, par securite)
+ia/.venv/
+*.pt
+__pycache__/
