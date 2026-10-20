@@ -238,7 +238,7 @@ static esp_err_t controle(httpd_req_t* req) {
   else if (!strcmp(var, "rotation")) ok = cameraRotation(atoi(val));
   else if (!strcmp(var, "liaison")) liaisonRoverActiver(atoi(val));
   else if (!strcmp(var, "tx")) {           // puissance WiFi en dBm (2 a 19,5), pour essais ;
-    float dbm = atof(val);                  // au demarrage : toujours le maximum
+    float dbm = atof(val);                  // au demarrage : 15 dBm (main.cpp)
     ok = dbm >= 2 && dbm <= 19.5f;
     if (ok) WiFi.setTxPower((wifi_power_t) (int) (dbm * 4));
   }

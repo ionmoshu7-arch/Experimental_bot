@@ -47,6 +47,7 @@
 #endif
 
 static const char* NOM_HOTE = "camera";      // camera.local
+static const wifi_power_t PUISSANCE_WIFI = WIFI_POWER_15dBm;   // voir setup()
 static bool otaDemarre = false;
 static bool etaitConnecte = false;
 
@@ -84,7 +85,10 @@ void setup() {
   WiFi.setSleep(false);                       // video plus fluide
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_MOT_DE_PASSE);
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);        // puissance d'emission maximale (video)
+  // 15 dBm, pas le maximum : a 19,5 dBm l'emetteur perturbe l'alimentation et
+  // la camera, la video tombe (essai du 20/10/2026 : 1,7 images/s a 19,5 dBm,
+  // 5,0 a 15 dBm, 5,9 a 11 dBm). Reglable a chaud : /control?var=tx&val=<dBm>
+  WiFi.setTxPower(PUISSANCE_WIFI);
   Serial.printf("[WIFI] connexion a \"%s\"", WIFI_SSID);
   unsigned long debut = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - debut < 15000) {
@@ -107,7 +111,7 @@ void loop() {
     Serial.printf("[WIFI] video : http://%s:%u/stream\n",
                   WiFi.localIP().toString().c_str(), PORT_FLUX);
     WiFi.setSleep(false);                     // economie d'energie WiFi coupee (latence)
-    WiFi.setTxPower(WIFI_POWER_19_5dBm);      // reimposee a chaque reconnexion
+    WiFi.setTxPower(PUISSANCE_WIFI);          // reimposee a chaque reconnexion
     if (!otaDemarre) demarrerOta();
   } else if (!connecte && etaitConnecte) {
     Serial.println("[WIFI] connexion perdue, reconnexion automatique...");
