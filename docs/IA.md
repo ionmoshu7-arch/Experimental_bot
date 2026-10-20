@@ -1,7 +1,7 @@
-# IA du rover : YOLOv8n sur le PC
+# IA du rover : YOLO26n sur le PC
 
 ```
- Carte caméra ──WiFi, vidéo MJPEG (port 82)──► PC : ia/rover_ia.py (YOLOv8n + suivi ByteTrack)
+ Carte caméra ──WiFi, vidéo MJPEG (port 82)──► PC : ia/rover_ia.py (YOLO26n + suivi ByteTrack)
                                                 │
  Rover ◄──────────── WiFi, WebSocket ───────────┘
    │  ◄── [IA]{détections}  (5/s)        → relayées aux pages : cadres sur la vidéo
@@ -22,7 +22,7 @@ Dans VS Code, menu **Terminal > Exécuter la tâche…** :
 | **IA rover : suivre une personne** | fenêtre ; suit une personne après appui sur **G** (démarre en pause) |
 | **IA rover : installer / mettre à jour** | (ré)installe Python 3.12, et installe ou met à jour PyTorch, YOLO, OpenCV |
 
-Au premier lancement, le modèle `yolov8n.pt` (environ 6 Mo) se télécharge tout seul.
+Au premier lancement, le modèle `yolo26n.pt` (environ 6 Mo) se télécharge tout seul.
 L'IA se connecte au rover (`rover.local`), annonce sa présence, puis récupère l'adresse
 de la caméra. Elle se reconnecte toute seule si le WiFi coupe.
 
@@ -78,18 +78,18 @@ appliquée) : la page les dessine directement sur la vidéo tournée.
   s'arrête au bout de 0,4 s (il ne roule pas à l'aveugle).
 
 ## Choisir le modèle
-Option `--modele` (par défaut `%LOCALAPPDATA%\RoverIA\yolov8n.pt`). Un modèle absent se
+Option `--modele` (par défaut `%LOCALAPPDATA%\RoverIA\yolo26n.pt`). Un modèle absent se
 télécharge tout seul au premier lancement. Comparaison faite le 20/10/2026 (ultralytics
-8.4, CPU, image 416, suivi ByteTrack) : les trois fonctionnent avec ce programme, à
-vitesse égale.
+8.4.181, PyTorch 2.14 CPU, image 416) : les trois fonctionnent avec ce programme, suivi
+ByteTrack compris, à la même vitesse (environ 22 ms par image sur ce PC).
 
-| Modèle | Remarque |
-|---|---|
-| `yolov8n.pt` | modèle d'origine, éprouvé sur le rover |
-| `yolo11n.pt` | personnes détectées avec une confiance un peu plus haute |
-| `yolo26n.pt` | dernier modèle Ultralytics ; confiance plus haute sur les personnes, voit aussi les petits objets (cravate) |
+| Modèle | Photo « 2 personnes » (Ultralytics) | Remarque |
+|---|---|---|
+| `yolo26n.pt` | personnes 0,87 et 0,86 · cravate 0,51 | **par défaut** : confiance plus haute sur les personnes, pas de fausse personne |
+| `yolo11n.pt` | personnes 0,86 et 0,85 | ne voit pas les cravates |
+| `yolov8n.pt` | personnes 0,91 et 0,71 · une fausse personne à 0,27 | ancien modèle par défaut |
 
-Exemple : `rover_ia.py --modele %LOCALAPPDATA%\RoverIA\yolo26n.pt`.
+Revenir à l'ancien modèle : `rover_ia.py --modele %LOCALAPPDATA%\RoverIA\yolov8n.pt`.
 
 ## Sécurité : les réflexes du rover passent avant l'IA
 - Le rover **n'avance pas** si un obstacle est à moins de 25 cm devant, et **ne recule pas**

@@ -1,5 +1,5 @@
 {
-  // IA du rover (YOLOv8n sur le PC) : Terminal > Executer la tache...
+  // IA du rover (YOLO26n sur le PC) : Terminal > Executer la tache...
   // Environnement Python : %LOCALAPPDATA%\RoverIA\venv (ia/installer.ps1)
   "version": "2.0.0",
   "tasks": [

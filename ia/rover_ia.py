@@ -1,11 +1,11 @@
-"""IA du rover : YOLOv8n sur le PC, video de la camera, ordres au rover.
+"""IA du rover : YOLO26n sur le PC, video de la camera, ordres au rover.
 
     python rover_ia.py                 fenetre video + detections
     python rover_ia.py --service       sans fenetre, pilotee par la page web
     python rover_ia.py --mode suivre   suit une personne des le lancement (en PAUSE, G)
 
 Le PC lit la video MJPEG de la carte camera (WiFi), detecte et suit les
-objets avec YOLOv8n + ByteTrack, et :
+objets avec YOLO26n + ByteTrack, et :
   - envoie ses detections a la page (cadres sur la video), 5 fois/s :
         [IA]{"det":[[x,y,l,h,"nom",confiance,id],...],"img":[l,h],...}
     (coordonnees 0..1 dans l'image remise droite) ;
@@ -213,7 +213,9 @@ def main():
     a.add_argument("--service", action="store_true", help="sans fenetre (pilotee par la page)")
     a.add_argument("--rover", default="rover.local")
     a.add_argument("--camera", help="adresse de la camera (sinon donnee par le rover)")
-    a.add_argument("--modele", default=os.path.join(DOSSIER_IA, "yolov8n.pt"))
+    # yolo26n : meme vitesse que yolov8n, personnes reconnues avec plus de confiance
+    # (comparaison du 20/10/2026, docs/IA.md). Ancien modele : --modele ...\yolov8n.pt
+    a.add_argument("--modele", default=os.path.join(DOSSIER_IA, "yolo26n.pt"))
     a.add_argument("--confiance", type=float, default=0.45)
     a.add_argument("--taille", type=int, default=416, help="taille d'image pour YOLO (plus petit = plus rapide)")
     a.add_argument("--distance", type=float, default=1.0, help="distance de suivi (m)")
