@@ -41,18 +41,93 @@ void etatCameraJson(char* buf, size_t taille) {
            enregistrementNbVideos(), __DATE__, __TIME__);
 }
 
-static void autoriserOrigines(httpd_req_t* req) {
-  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+// ---------- controle d'acces ----------
+// Protege la video, les photos, le journal et la carte TF des sites Internet
+// ouverts dans un navigateur du reseau :
+//  - Host : la requete doit viser camera.local ou l'IP de la camera (bloque
+//    l'attaque « DNS rebinding », ou un site se fait passer pour la camera) ;
+//  - Origin : seules les pages du rover et de la camera peuvent lire les
+//    reponses (avant : « * », n'importe quel site) ;
+//  - actions (photo, reglages, vider la carte) : en-tete X-Rover obligatoire.
+//    Un autre site ne peut pas l'envoyer (le navigateur demande d'abord
+//    l'accord de la camera, refuse), ni par un simple lien ou une image.
+// Le PC (IA, televersement) n'envoie pas d'Origin : il passe.
+static const char* NOM_CAMERA = "camera.local";
+static const char* NOM_ROVER_WEB = "rover.local";
+// valeurs gardees en memoire : httpd envoie l'en-tete apres la fonction
+static char origineRoverNom[32], origineRoverIp[32], origineCameraNom[32], origineCameraIp[32];
+
+static bool memeHote(const char* valeur, const char* nom) {
+  size_t n = strlen(nom);
+  return strncasecmp(valeur, nom, n) == 0 && (valeur[n] == 0 || valeur[n] == ':' || valeur[n] == '/');
+}
+
+// origine autorisee -> la meme chaine, gardee en memoire ; sinon nullptr
+static const char* origineConnue(const char* origine) {
+  String ipRover = liaisonRoverIp().toString(), ipCam = WiFi.localIP().toString();
+  snprintf(origineRoverNom, sizeof(origineRoverNom), "http://%s", NOM_ROVER_WEB);
+  snprintf(origineRoverIp, sizeof(origineRoverIp), "http://%s", ipRover.c_str());
+  snprintf(origineCameraNom, sizeof(origineCameraNom), "http://%s", NOM_CAMERA);
+  snprintf(origineCameraIp, sizeof(origineCameraIp), "http://%s", ipCam.c_str());
+  // l'IP du rover n'est connue qu'une fois la liaison etablie
+  const char* connues[] = { origineRoverNom, origineCameraNom, origineCameraIp,
+                            ipRover != "0.0.0.0" ? origineRoverIp : "" };
+  for (const char* o : connues)
+    if (*o && strcasecmp(origine, o) == 0) return o;
+  return nullptr;
+}
+
+static esp_err_t refuser(httpd_req_t* req, const char* raison) {
+  Serial.printf("[CAM] acces refuse (%s) : %s\n", raison, req->uri);
+  httpd_resp_set_status(req, "403 Forbidden");
+  httpd_resp_set_type(req, "text/plain");
+  httpd_resp_sendstr(req, "acces refuse");
+  return ESP_OK;
+}
+
+// true : la requete peut continuer ; false : deja refusee (403)
+static bool controleAcces(httpd_req_t* req, bool action) {
+  char hote[48] = "", origine[64] = "", jeton[8] = "";
+  httpd_req_get_hdr_value_str(req, "Host", hote, sizeof(hote));
+  String ipCam = WiFi.localIP().toString();
+  if (!memeHote(hote, NOM_CAMERA) && !memeHote(hote, ipCam.c_str())) {
+    refuser(req, "adresse");
+    return false;
+  }
+  if (httpd_req_get_hdr_value_str(req, "Origin", origine, sizeof(origine)) == ESP_OK) {
+    const char* o = origineConnue(origine);
+    if (!o) { refuser(req, "origine"); return false; }
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", o);
+    httpd_resp_set_hdr(req, "Vary", "Origin");
+  }
+  if (action && httpd_req_get_hdr_value_str(req, "X-Rover", jeton, sizeof(jeton)) != ESP_OK) {
+    refuser(req, "action sans X-Rover");
+    return false;
+  }
+  return true;
+}
+
+// pre-verification du navigateur avant une requete avec X-Rover
+static esp_err_t preverification(httpd_req_t* req) {
+  if (!controleAcces(req, false)) return ESP_OK;
+  char origine[64] = "";
+  if (httpd_req_get_hdr_value_str(req, "Origin", origine, sizeof(origine)) != ESP_OK)
+    return refuser(req, "pre-verification sans origine");
+  httpd_resp_set_status(req, "204 No Content");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "X-Rover");
+  httpd_resp_set_hdr(req, "Access-Control-Max-Age", "600");
+  return httpd_resp_send(req, nullptr, 0);
 }
 
 static esp_err_t envoyerJson(httpd_req_t* req, const char* json) {
-  autoriserOrigines(req);
   httpd_resp_set_type(req, "application/json");
   return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
 // ---------- page de test ----------
 static esp_err_t pageAccueil(httpd_req_t* req) {
+  if (!controleAcces(req, false)) return ESP_OK;
   String ip = WiFi.localIP().toString();
   String page =
     "<!doctype html><html lang=fr><meta charset=utf-8>"
@@ -61,8 +136,7 @@ static esp_err_t pageAccueil(httpd_req_t* req) {
     "<h1 style='font-size:20px'>Camera du rover</h1>"
     "<img src='http://" + ip + ":81/stream' style='max-width:100%;border-radius:8px;"
     "transform:rotate(" + String(cameraRotationActuelle()) + "deg)'>"
-    "<p><a href='/capture'>Image</a> &middot; <a href='/photo'>Photo sur la carte TF</a>"
-    " &middot; <a href='/status'>Etat</a></p>"
+    "<p><a href='/capture'>Image</a> &middot; <a href='/status'>Etat</a></p>"
     "<p>Page complete : celle du rover (http://rover.local/).</p></body></html>";
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   return httpd_resp_send(req, page.c_str(), page.length());
@@ -70,9 +144,9 @@ static esp_err_t pageAccueil(httpd_req_t* req) {
 
 // ---------- une image ----------
 static esp_err_t capture(httpd_req_t* req) {
+  if (!controleAcces(req, false)) return ESP_OK;
   camera_fb_t* fb = esp_camera_fb_get();
   if (!fb) { httpd_resp_send_500(req); return ESP_FAIL; }
-  autoriserOrigines(req);
   httpd_resp_set_type(req, "image/jpeg");
   httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=capture.jpg");
   esp_err_t res = httpd_resp_send(req, (const char*) fb->buf, fb->len);
@@ -82,6 +156,7 @@ static esp_err_t capture(httpd_req_t* req) {
 
 // ---------- photo sur la carte TF ----------
 static esp_err_t photo(httpd_req_t* req) {
+  if (!controleAcces(req, true)) return ESP_OK;
   char json[160];
   if (!stockagePresent()) return envoyerJson(req, "{\"ok\":0,\"erreur\":\"pas de carte TF\"}");
   camera_fb_t* fb = esp_camera_fb_get();
@@ -98,6 +173,7 @@ static esp_err_t photo(httpd_req_t* req) {
 
 // ---------- lire un fichier de la carte TF ----------
 static esp_err_t lireFichier(httpd_req_t* req) {
+  if (!controleAcces(req, false)) return ESP_OK;
   char requete[96], chemin[64];
   if (httpd_req_get_url_query_str(req, requete, sizeof(requete)) != ESP_OK ||
       httpd_query_key_value(requete, "f", chemin, sizeof(chemin)) != ESP_OK ||
@@ -109,7 +185,6 @@ static esp_err_t lireFichier(httpd_req_t* req) {
   }
   File f = SD_MMC.open(chemin);
   if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
-  autoriserOrigines(req);
   // tout ce qui n'est pas une photo se telecharge (video AVI, mesures, journal)
   bool video = strncmp(chemin, "/photos/", 8) != 0;
   const char* ext = strrchr(chemin, '.');
@@ -135,14 +210,20 @@ static esp_err_t lireFichier(httpd_req_t* req) {
 }
 
 // ---------- etat ----------
-static esp_err_t status(httpd_req_t* req) {
+static esp_err_t repondreEtat(httpd_req_t* req) {
   char json[640];
   etatCameraJson(json, sizeof(json));
   return envoyerJson(req, json);
 }
 
+static esp_err_t status(httpd_req_t* req) {
+  if (!controleAcces(req, false)) return ESP_OK;
+  return repondreEtat(req);
+}
+
 // ---------- reglages ----------
 static esp_err_t controle(httpd_req_t* req) {
+  if (!controleAcces(req, true)) return ESP_OK;
   char requete[96], var[16], val[16];
   if (httpd_req_get_url_query_str(req, requete, sizeof(requete)) != ESP_OK ||
       httpd_query_key_value(requete, "var", var, sizeof(var)) != ESP_OK ||
@@ -162,14 +243,14 @@ static esp_err_t controle(httpd_req_t* req) {
   }
   else ok = false;
   Serial.printf("[CAM] reglage %s = %s : %s\n", var, val, ok ? "ok" : "refuse");
-  return status(req);
+  return repondreEtat(req);
 }
 
 // ---------- flux video MJPEG ----------
 static esp_err_t flux(httpd_req_t* req) {
+  if (!controleAcces(req, false)) return ESP_OK;
   esp_err_t res = httpd_resp_set_type(req, TYPE_FLUX);
   if (res != ESP_OK) return res;
-  autoriserOrigines(req);
   nbFlux++;
   Serial.println("[CAM] un ecran regarde la video");
   char entete[64];
@@ -204,6 +285,7 @@ static esp_err_t flux(httpd_req_t* req) {
 
 // ---------- journal de navigation ----------
 static esp_err_t journaux(httpd_req_t* req) {
+  if (!controleAcces(req, false)) return ESP_OK;
   String liste;
   journalListeJson(liste);
   String json = String("{\"courant\":\"") + journalFichierCourant() + "\",\"fichiers\":" + liste + "}";
@@ -222,6 +304,7 @@ int viderCarte() {
 }
 
 static esp_err_t vider(httpd_req_t* req) {
+  if (!controleAcces(req, true)) return ESP_OK;
   char requete[64], confirmer[8] = "";
   if (httpd_req_get_url_query_str(req, requete, sizeof(requete)) == ESP_OK)
     httpd_query_key_value(requete, "confirmer", confirmer, sizeof(confirmer));
@@ -237,6 +320,7 @@ static esp_err_t vider(httpd_req_t* req) {
 // ---------- mise a jour du programme par HTTP (POST /maj) ----------
 // Le PC envoie le firmware en POST brut, mot de passe dans X-Mot-De-Passe.
 static esp_err_t miseAJour(httpd_req_t* req) {
+  if (!controleAcces(req, false)) return ESP_OK;    // + mot de passe ci-dessous
   char mdp[64] = "";
   httpd_req_get_hdr_value_str(req, "X-Mot-De-Passe", mdp, sizeof(mdp));
   if (!motDePasseMaj || strcmp(mdp, motDePasseMaj) != 0) {
@@ -280,6 +364,7 @@ void serveurCameraDemarrer(const char* motDePasse) {
   cfg.ctrl_port = 32768;
   cfg.max_uri_handlers = 12;
   cfg.stack_size = 8192;
+  cfg.uri_match_fn = httpd_uri_match_wildcard;   // "/*" : pre-verifications (OPTIONS)
   if (httpd_start(&serveurHttp, &cfg) == ESP_OK) {
     httpd_uri_t pages[] = {
       { "/",        HTTP_GET, pageAccueil, nullptr },
@@ -291,6 +376,7 @@ void serveurCameraDemarrer(const char* motDePasse) {
       { "/maj",     HTTP_POST, miseAJour,  nullptr },
       { "/journaux", HTTP_GET, journaux,   nullptr },
       { "/vider",   HTTP_GET, vider,       nullptr },
+      { "/*",       HTTP_OPTIONS, preverification, nullptr },
     };
     for (auto &p : pages) httpd_register_uri_handler(serveurHttp, &p);
   }

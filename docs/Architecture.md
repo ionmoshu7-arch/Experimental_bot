@@ -96,8 +96,33 @@ La caméra écrit sur sa carte TF tout ce que le rover envoie : ses mesures `[DA
 - Liste et téléchargement : section « Journal de navigation » de la page, ou
   http://camera.local/journaux.
 
-## IA (YOLOv8n sur le PC)
+## IA (YOLO26n sur le PC)
 
 Voir [IA.md](IA.md) : détections dans la page, réglages depuis la page, mission « Suivre ».
 Pour la faire évoluer avec Claude : [prompt_claude_yolo.md](prompt_claude_yolo.md).
 Les réflexes de sécurité du rover restent prioritaires.
+
+## Sécurité et données personnelles
+
+La caméra filme l'intérieur de la maison : vidéo, photos et journal sont des données
+personnelles. Protections en place (20/10/2026) :
+
+| Zone | Protection |
+|---|---|
+| WebSocket du rover (:81) | seules la page du rover (`rover.local` ou son IP), l'IA du PC et la caméra peuvent se connecter : un site Internet ouvert dans un navigateur du réseau ne peut plus piloter le rover ni lire ses données (contrôle de l'en-tête `Origin`) |
+| Caméra (:80, :81, :82) | la requête doit viser `camera.local` ou l'IP de la caméra (bloque le « DNS rebinding ») ; seules les pages du rover et de la caméra peuvent lire les réponses (fin du `Access-Control-Allow-Origin: *`) |
+| Actions de la caméra (photo, réglages, vider la carte) | en-tête `X-Rover` obligatoire : un lien ou une image piégée sur un autre site ne peut plus les déclencher |
+| Mises à jour (`/maj`, OTA) | mot de passe de `include/secrets.h` / `secrets.ini` |
+| Dépôt GitHub (public) | mots de passe et nom du réseau WiFi jamais publiés (vérifié dans tout l'historique) ; photos, vidéos et journaux exclus par `.gitignore` ; l'IA n'enregistre aucune image |
+
+Conséquences pratiques :
+- Ouvrir la page par **http://rover.local/** (ou l'IP du rover). Ouverte comme fichier
+  local, elle ne peut plus se connecter en WiFi (le câble USB marche toujours).
+- Un outil maison qui appelle la caméra doit viser `camera.local` ou son IP, et ajouter
+  l'en-tête `X-Rover: 1` pour les actions.
+
+Limites connues : sur le réseau de la maison, quelqu'un qui ouvre la page du rover peut
+toujours piloter le rover et voir la vidéo (pas de mot de passe sur la page ni sur
+RemoteXY), et les échanges ne sont pas chiffrés (HTTP). Ne pas exposer le rover ni la
+caméra sur Internet (pas de redirection de port sur la box), et garder un mot de passe
+WiFi solide.

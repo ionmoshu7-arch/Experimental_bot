@@ -33,6 +33,27 @@ static RappelSimple rappelDeconnexionIA = nullptr;
 
 static bool estPage(uint8_t i) { return !estCamera[i] && !estIA[i]; }
 
+// Origine des connexions WebSocket. Un navigateur ouvre un WebSocket vers
+// n'importe quelle adresse : sans ce controle, un site Internet ouvert sur
+// un PC ou un telephone du reseau pourrait piloter le rover et lire ses
+// donnees. Acceptes : la page du rover (rover.local ou son IP), l'IA du PC
+// (son Origin est l'IP du rover) et la carte camera ("file://", envoye par
+// la bibliotheque WebSockets, jamais par un navigateur). Sans Origin : outil.
+static bool origineAutorisee(String nom, String valeur) {
+  if (!nom.equalsIgnoreCase("Origin") || valeur == "file://") return true;
+  int debut = valeur.indexOf("://");
+  if (debut >= 0) {
+    String hote = valeur.substring(debut + 3);
+    int fin = hote.indexOf(':');
+    if (fin < 0) fin = hote.indexOf('/');
+    if (fin >= 0) hote = hote.substring(0, fin);
+    if (hote.equalsIgnoreCase(String(NOM_HOTE) + ".local") || hote == WiFi.localIP().toString())
+      return true;
+  }
+  Serial.printf("[WIFI] connexion refusee, origine inconnue : %s\n", valeur.c_str());
+  return false;
+}
+
 // Message d'une page ou d'une mission vers les clients d'un type
 static void envoyerA(bool* type, const char* texte, size_t longueur) {
   for (uint8_t i = 0; i < WEBSOCKETS_SERVER_CLIENT_MAX; i++)
@@ -194,6 +215,7 @@ void reseauDemarrer(const char* ssid, const char* motDePasse,
   // onglet ou IA tues) est deconnecte apres environ 8 s. Sans cela, sa place
   // restait prise et, les places pleines, plus personne ne pouvait se connecter.
   webSocket.enableHeartbeat(2000, 3000, 2);
+  webSocket.onValidateHttpHeader(origineAutorisee, nullptr, 0);
 
   // Attente courte : sans reseau, le rover demarre quand meme
   Serial.printf("[WIFI] connexion a \"%s\"", ssid);

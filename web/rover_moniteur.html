@@ -1843,8 +1843,11 @@
   }
   setInterval(majVideo, 1000);
 
+  // X-Rover : la camera refuse les actions sans cet en-tete, qu'un autre
+  // site ne peut pas envoyer (protection de la video et de la carte TF)
+  const ENTETES_CAMERA = { headers: { "X-Rover": "1" } };
   async function demanderCamera(chemin) {
-    const r = await fetch(camBase + chemin);
+    const r = await fetch(camBase + chemin, ENTETES_CAMERA);
     return r.json();
   }
   async function reglerCamera(variable, valeur) {
@@ -1945,7 +1948,7 @@
     clearInterval(minuteurCamDirecte);
     if (!adr) return;
     const interroger = async () => {
-      try { afficherCamera(await (await fetch(`http://${adr}/status`)).json()); }
+      try { afficherCamera(await (await fetch(`http://${adr}/status`, ENTETES_CAMERA)).json()); }
       catch (e) { setTxt($("camMessage"), `Camera ${adr} injoignable`); }
     };
     interroger();

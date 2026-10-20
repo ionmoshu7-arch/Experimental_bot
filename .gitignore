@@ -8,6 +8,16 @@
 include/secrets.h
 secrets.ini
 
+# Donnees personnelles : copies de la carte TF de la camera (photos, videos,
+# journaux de navigation) et captures, jamais sur GitHub (depot public)
+*.jpg
+*.jpeg
+*.avi
+*.jsonl
+photos/
+videos/
+journal/
+
 # IA : environnement Python et modeles (hors OneDrive, par securite)
 ia/.venv/
 *.pt

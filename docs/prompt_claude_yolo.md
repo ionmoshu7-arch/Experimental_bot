@@ -5,12 +5,12 @@ remplacer la dernière ligne par ce que l'on veut obtenir.
 
 ```text
 Projet PlatformIO « Experimental_bot » : rover ESP32-S3 + carte caméra ESP32-S3 (OV2640),
-IA YOLOv8n sur le PC. Lis d'abord docs/IA.md, docs/Architecture.md et
+IA YOLO26n sur le PC. Lis d'abord docs/IA.md, docs/Architecture.md et
 docs/architecture_rover.html, puis ia/rover_ia.py.
 
 Fonctionnement actuel :
 - ia/rover_ia.py lit la vidéo MJPEG de la caméra sur le port 82 (le port 81 est pour la
-  page), détecte avec YOLOv8n + ByteTrack, et se connecte au WebSocket du rover
+  page), détecte avec YOLO26n + ByteTrack, et se connecte au WebSocket du rover
   (ws://rover.local:81/).
 - Elle s'annonce par « [IA]{...} » ; ses trames « [IA]{"det":[[x,y,l,h,"nom",conf,id],...],
   "img":[l,h],"ips":..,"conf":..,"classes":[..],"affichage":..,"suivi":..,"classe":..,
@@ -32,7 +32,11 @@ Règles à respecter :
   roulent. Pour tester sans risque : --vitesse-max 0 --rotation-max 0.
 - Garder le protocole [IA] / [POURIA] compatible avec la page, ou mettre à jour la page
   et docs/IA.md en même temps.
-- Secrets dans include/secrets.h et secrets.ini : jamais dans git (dépôt public).
+- Secrets dans include/secrets.h et secrets.ini : jamais dans git (dépôt public), ni le
+  nom du réseau WiFi, ni photos, vidéos ou journaux de la carte TF.
+- Garder les protections d'accès (docs/Architecture.md, « Sécurité et données
+  personnelles ») : contrôle de l'Origin sur le WebSocket du rover, Host / Origin /
+  en-tête X-Rover sur la caméra.
 - Mettre à jour docs/IA.md, docs/architecture_rover.html (+ PNG) si le fonctionnement
   change, puis commit et push.
 - Discuter de l'architecture avec moi avant un gros changement.

@@ -4,7 +4,7 @@ Le firmware `test_capteurs` contient déjà tout le code RemoteXY
 ([RemoteXYControle.cpp](../src/test_capteurs/RemoteXYControle.cpp)). Il ne manque que
 **l'interface** (l'écran du téléphone), qui se dessine sur le site RemoteXY.
 
-Le rover reste sur le WiFi « Voyager 1 » : la page web, le WebSocket et les mises à jour
+Le rover reste sur le WiFi de la maison : la page web, le WebSocket et les mises à jour
 par WiFi continuent de fonctionner en même temps.
 
 ## 1. Créer l'interface sur remotexy.com (sur le PC)
@@ -45,7 +45,7 @@ ne correspond pas au tableau ci-dessus : le corriger dans l'éditeur et recopier
 ## 2. Connecter le téléphone Samsung
 
 1. Installer **RemoteXY** depuis le Google Play Store.
-2. Mettre le téléphone sur le WiFi **Voyager 1**.
+2. Mettre le téléphone sur le même WiFi que le rover (celui de `include/secrets.h`).
 3. Dans l'application : **+** → **WiFi** (connexion TCP) →
    adresse **192.168.129.13**, port **6377** → connexion.
    L'adresse s'affiche aussi au démarrage du rover (`[WIFI] connecte : ...`)
