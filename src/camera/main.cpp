@@ -84,6 +84,7 @@ void setup() {
   WiFi.setSleep(false);                       // video plus fluide
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_MOT_DE_PASSE);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);        // puissance d'emission maximale (video)
   Serial.printf("[WIFI] connexion a \"%s\"", WIFI_SSID);
   unsigned long debut = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - debut < 15000) {
@@ -106,6 +107,7 @@ void loop() {
     Serial.printf("[WIFI] video : http://%s:%u/stream\n",
                   WiFi.localIP().toString().c_str(), PORT_FLUX);
     WiFi.setSleep(false);                     // economie d'energie WiFi coupee (latence)
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);      // reimposee a chaque reconnexion
     if (!otaDemarre) demarrerOta();
   } else if (!connecte && etaitConnecte) {
     Serial.println("[WIFI] connexion perdue, reconnexion automatique...");

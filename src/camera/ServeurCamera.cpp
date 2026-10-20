@@ -29,13 +29,13 @@ void etatCameraJson(char* buf, size_t taille) {
            "{\"ip\":\"%s\",\"flux\":\"http://%s:%u/stream\",\"fluxIA\":\"http://%s:%u/stream\","
            "\"modele\":\"%s\","
            "\"res\":\"%s\",\"qualite\":%d,\"vflip\":%d,\"miroir\":%d,\"rotation\":%d,\"ips\":%.1f,"
-           "\"ecrans\":%d,\"sd\":%d,\"photos\":%d,\"libreMo\":%u,\"rssi\":%d,"
+           "\"ecrans\":%d,\"sd\":%d,\"photos\":%d,\"libreMo\":%u,\"rssi\":%d,\"tx\":%.1f,"
            "\"rover\":%d,\"psramLibreKo\":%u,\"rec\":%d,\"recSec\":%d,\"recMax\":%d,"
            "\"recFichier\":\"%s\",\"videos\":%d,\"version\":\"%s %s\"}",
            ip.c_str(), ip.c_str(), PORT_FLUX, ip.c_str(), PORT_FLUX_IA, cameraModele(), cameraNomResolution(),
            cameraQualiteActuelle(), cameraRetourneeV(), cameraMiroir(), cameraRotationActuelle(),
            cameraImagesParSeconde(), nbFlux, stockagePresent(), stockageNbPhotos(),
-           stockageLibreMo(), WiFi.RSSI(), liaisonRoverConnectee(),
+           stockageLibreMo(), WiFi.RSSI(), WiFi.getTxPower() / 4.0f, liaisonRoverConnectee(),
            (unsigned) (ESP.getFreePsram() / 1024), enregistrementEnCours(),
            enregistrementSecondes(), DUREE_MAX_S, enregistrementFichier(),
            enregistrementNbVideos(), __DATE__, __TIME__);
@@ -237,6 +237,11 @@ static esp_err_t controle(httpd_req_t* req) {
   else if (!strcmp(var, "miroir"))  cameraRetourner(cameraRetourneeV(), atoi(val));
   else if (!strcmp(var, "rotation")) ok = cameraRotation(atoi(val));
   else if (!strcmp(var, "liaison")) liaisonRoverActiver(atoi(val));
+  else if (!strcmp(var, "tx")) {           // puissance WiFi en dBm (2 a 19,5), pour essais ;
+    float dbm = atof(val);                  // au demarrage : toujours le maximum
+    ok = dbm >= 2 && dbm <= 19.5f;
+    if (ok) WiFi.setTxPower((wifi_power_t) (int) (dbm * 4));
+  }
   else if (!strcmp(var, "video")) {
     if (atoi(val)) ok = enregistrementDemarrer();
     else enregistrementArreter();

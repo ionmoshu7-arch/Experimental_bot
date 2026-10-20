@@ -177,8 +177,8 @@ static void envoyerJson() {
           te.tangage, te.roulis, te.rugosite, te.bosses, te.glissement);
 
   // version = date de compilation : montre qu'une mise a jour a pris
-  ajouter(",\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"clients\":%d,\"version\":\"%s %s\"}}",
-          reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauNbClients(),
+  ajouter(",\"net\":{\"ok\":%d,\"ip\":\"%s\",\"rssi\":%d,\"tx\":%.1f,\"clients\":%d,\"version\":\"%s %s\"}}",
+          reseauConnecte(), reseauIp().c_str(), reseauRssi(), reseauPuissanceTx(), reseauNbClients(),
           __DATE__, __TIME__);
 
   Serial.println(trame);

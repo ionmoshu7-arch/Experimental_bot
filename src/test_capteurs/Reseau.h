@@ -40,4 +40,5 @@ void reseauDiffuser(const char* texte, size_t longueur);   // vers tous les clie
 bool reseauConnecte();
 int reseauNbClients();
 int reseauRssi();
+float reseauPuissanceTx();   // puissance d'emission WiFi (dBm), 19,5 = maximum
 String reseauIp();

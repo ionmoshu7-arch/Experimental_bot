@@ -985,7 +985,8 @@
     setTxt($("bHz"), j.hz + " Hz");
     if (j.net) {
       setTxt($("netInfo"), j.net.ok
-        ? `WiFi ${j.net.ip} · ${j.net.rssi} dBm · ${j.net.clients} client(s)`
+        ? `WiFi ${j.net.ip} · ${j.net.rssi} dBm` + (j.net.tx !== undefined ? ` · emission ${j.net.tx} dBm` : "")
+          + ` · ${j.net.clients} client(s)`
         : "WiFi du rover : non connecte");
       setTxt($("bWifi"), j.net.ok ? j.net.rssi + " dBm" : "non");
       if (j.net.version) setTxt($("versionInfo"), "programme du " + j.net.version);

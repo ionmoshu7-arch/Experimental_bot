@@ -194,6 +194,7 @@ void reseauDemarrer(const char* ssid, const char* motDePasse,
   WiFi.setSleep(false);          // latence plus faible pour le pilotage
   WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, motDePasse);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);   // puissance d'emission maximale (portee)
 
   serveur.on("/", []() {
     serveur.send_P(200, "text/html; charset=utf-8", pageControle, strlen(pageControle));
@@ -233,8 +234,9 @@ void reseauDemarrer(const char* ssid, const char* motDePasse,
 void reseauMettreAJour() {
   bool connecte = WiFi.status() == WL_CONNECTED;
   if (connecte && !etaitConnecte) {
-    Serial.printf("[WIFI] connecte : http://%s.local/  ou  http://%s/  (%d dBm)\n",
-                  NOM_HOTE, WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);   // reimposee a chaque reconnexion
+    Serial.printf("[WIFI] connecte : http://%s.local/  ou  http://%s/  (%d dBm, emission %.1f dBm)\n",
+                  NOM_HOTE, WiFi.localIP().toString().c_str(), WiFi.RSSI(), reseauPuissanceTx());
     if (!servicesDemarres) demarrerServices();
   } else if (!connecte && etaitConnecte) {
     Serial.println("[WIFI] connexion perdue, reconnexion automatique...");
@@ -272,4 +274,5 @@ void reseauDiffuser(const char* texte, size_t longueur) {
 bool reseauConnecte()  { return WiFi.status() == WL_CONNECTED; }
 int reseauNbClients()  { return webSocket.connectedClients(); }
 int reseauRssi()       { return reseauConnecte() ? WiFi.RSSI() : 0; }
+float reseauPuissanceTx() { return WiFi.getTxPower() / 4.0f; }   // pas de 0,25 dBm
 String reseauIp()      { return reseauConnecte() ? WiFi.localIP().toString() : String(""); }
