@@ -11,5 +11,6 @@ if (-not (Test-Path $python)) {
 $venv = "$env:LOCALAPPDATA\RoverIA\venv"
 if (-not (Test-Path "$venv\Scripts\python.exe")) { & $python -m venv $venv }
 & "$venv\Scripts\python.exe" -m pip install --upgrade pip
-& "$venv\Scripts\python.exe" -m pip install -r "$PSScriptRoot\requirements.txt"
+# --upgrade : relancer ce script met aussi a jour YOLO, PyTorch et OpenCV
+& "$venv\Scripts\python.exe" -m pip install --upgrade -r "$PSScriptRoot\requirements.txt"
 Write-Host "Pret. Lancer depuis VS Code : Terminal > Executer la tache > IA rover : voir / suivre"

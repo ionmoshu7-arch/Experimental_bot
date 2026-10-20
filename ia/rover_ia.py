@@ -12,7 +12,7 @@ objets avec YOLOv8n + ByteTrack, et :
   - recoit les reglages de la page : [POURIA] conf 0.5 | classes person,chair
     | affichage 1/0 | suivre <classe> | stop ;
   - pendant une mission "suivre" (bouton de la page, ou G dans la fenetre),
-    envoie au rover des ordres "I vitesse rotation" 10 fois/s.
+    envoie au rover des ordres "I vitesse rotation", un par image (10/s au plus).
 Les reflexes du rover passent avant : pas d'avance si un obstacle est a
 moins de 25 cm, arret si l'IA se tait 0,4 s ou se deconnecte.
 
@@ -69,16 +69,25 @@ class Rover:
                 while True:
                     message = self.ws.recv()
                     for ligne in str(message).splitlines():
-                        if ligne.startswith("[DATA]"):
-                            self.etat = json.loads(ligne[6:])
-                        elif ligne.startswith("[CAM]"):
-                            self.camera = json.loads(ligne[5:])
-                        elif ligne.startswith("[POURIA]"):
-                            self.reglages.put(ligne[8:].strip())
+                        try:
+                            if ligne.startswith("[DATA]"):
+                                self.etat = json.loads(ligne[6:])
+                            elif ligne.startswith("[CAM]"):
+                                self.camera = json.loads(ligne[5:])
+                            elif ligne.startswith("[POURIA]"):
+                                self.reglages.put(ligne[8:].strip())
+                        except ValueError:
+                            pass        # trame abimee : on l'ignore, sans couper la liaison
             except Exception as e:
                 if self.connecte:
                     print(f"[IA] rover perdu ({e}), reconnexion...")
                 self.connecte = False
+                with self.verrou:
+                    try:
+                        if self.ws:
+                            self.ws.close()     # libere la place sur le rover (8 au plus)
+                    except Exception:
+                        pass
                 time.sleep(2)
 
     def envoyer(self, texte):
@@ -250,7 +259,11 @@ def main():
                 if not cmd:
                     continue
                 if cmd[0] == "conf" and len(cmd) > 1:
-                    reglage["conf"] = max(0.05, min(0.95, float(cmd[1])))
+                    try:
+                        reglage["conf"] = max(0.05, min(0.95, float(cmd[1])))
+                    except ValueError:
+                        print(f"[IA] reglage ignore (nombre attendu) : {' '.join(cmd)}")
+                        continue
                 elif cmd[0] == "classes":
                     reglage["classes"] = {c for c in (cmd[1].split(",") if len(cmd) > 1 else []) if c in noms_classes}
                 elif cmd[0] == "affichage" and len(cmd) > 1:

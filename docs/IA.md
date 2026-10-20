@@ -5,7 +5,7 @@
                                                 │
  Rover ◄──────────── WiFi, WebSocket ───────────┘
    │  ◄── [IA]{détections}  (5/s)        → relayées aux pages : cadres sur la vidéo
-   │  ◄── I vitesse rotation (10/s)      → seulement pendant un suivi
+   │  ◄── I vitesse rotation (≤ 10/s)    → seulement pendant un suivi
    │  ──► [DATA] état, [CAM] adresse de la caméra
    │  ──► [POURIA] réglages venus de la page ou de la mission « Suivre »
  Page web ── [POURIA] conf 0.5 | classes person,cup | affichage 1 | suivre person | stop
@@ -20,7 +20,7 @@ Dans VS Code, menu **Terminal > Exécuter la tâche…** :
 | **IA rover : voir** | fenêtre vidéo avec les détections, et cadres envoyés à la page |
 | **IA rover : service sans fenêtre** | même chose sans fenêtre : tout se règle depuis la page |
 | **IA rover : suivre une personne** | fenêtre ; suit une personne après appui sur **G** (démarre en pause) |
-| **IA rover : installer / mettre à jour** | (ré)installe Python 3.12, PyTorch, YOLO, OpenCV |
+| **IA rover : installer / mettre à jour** | (ré)installe Python 3.12, et installe ou met à jour PyTorch, YOLO, OpenCV |
 
 Au premier lancement, le modèle `yolov8n.pt` (environ 6 Mo) se télécharge tout seul.
 L'IA se connecte au rover (`rover.local`), annonce sa présence, puis récupère l'adresse
@@ -73,6 +73,23 @@ appliquée) : la page les dessine directement sur la vidéo tournée.
   la chercher (à améliorer).
 - Options de `rover_ia.py` : `--vitesse-max` (110), `--rotation-max` (90), `--taille`
   (416 ; plus petit = plus rapide, moins précis).
+- Les ordres partent une fois par image analysée, 10 par seconde au plus : en pratique
+  6 à 10 par seconde selon la vidéo. Si la vidéo se fige, les ordres cessent et le rover
+  s'arrête au bout de 0,4 s (il ne roule pas à l'aveugle).
+
+## Choisir le modèle
+Option `--modele` (par défaut `%LOCALAPPDATA%\RoverIA\yolov8n.pt`). Un modèle absent se
+télécharge tout seul au premier lancement. Comparaison faite le 20/10/2026 (ultralytics
+8.4, CPU, image 416, suivi ByteTrack) : les trois fonctionnent avec ce programme, à
+vitesse égale.
+
+| Modèle | Remarque |
+|---|---|
+| `yolov8n.pt` | modèle d'origine, éprouvé sur le rover |
+| `yolo11n.pt` | personnes détectées avec une confiance un peu plus haute |
+| `yolo26n.pt` | dernier modèle Ultralytics ; confiance plus haute sur les personnes, voit aussi les petits objets (cravate) |
+
+Exemple : `rover_ia.py --modele %LOCALAPPDATA%\RoverIA\yolo26n.pt`.
 
 ## Sécurité : les réflexes du rover passent avant l'IA
 - Le rover **n'avance pas** si un obstacle est à moins de 25 cm devant, et **ne recule pas**

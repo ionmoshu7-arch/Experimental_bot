@@ -20,7 +20,7 @@ Fonctionnement actuel :
 - La page et les missions lui envoient « [POURIA] conf 0.4 | classes person,cup |
   affichage 1/0 | suivre <classe> | stop » (noms YOLO, espaces remplacés par « _ »).
 - Elle ne pilote que pendant une mission « suivre » (M suivre <classe> sur le rover, ou
-  touche G) : ordres « I vitesse rotation » 10 fois/s. Le rover garde ses réflexes : pas
+  touche G) : ordres « I vitesse rotation » jusqu’à 10 fois/s. Le rover garde ses réflexes : pas
   d'avance si obstacle < 25 cm, arrêt si l'IA se tait 0,4 s ou se déconnecte.
 - Environnement Python : %LOCALAPPDATA%\RoverIA\venv (hors OneDrive), installé par
   ia/installer.ps1. Tâches VS Code dans .vscode/tasks.json.
